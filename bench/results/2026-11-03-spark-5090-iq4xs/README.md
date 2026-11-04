@@ -23,11 +23,16 @@ actual token counts, cache statistics, settings and answer previews.
 
 The first committed profile used a 16,384-token prompt chunk and measured
 6,618.3 tok/s at 32K. A 32,768-token chunk measured 7,418.8 tok/s in a
-temporary, same-build run with the same answer-preserving switches. The final
-installed profile measured 7,318.6 tok/s at 32K, 10.6% above the installed
-16K profile. It needs about 50 GiB of pinned expert RAM and left about 22 GiB
-available after the run. The final run above is the measurement of the profile
-actually installed.
+temporary, same-build run with the same answer-preserving switches. The 32K
+profile measured 7,318.6 tok/s at 32K, 10.6% above the 16K profile. It needs
+about 50 GiB of pinned expert RAM and left about 22 GiB available after the
+run.
+
+After copying the fork's runtime into `/home/spark/Apps/Strata` and pointing
+the user service there, a fresh three-repeat benchmark measured 138.6 decode,
+1,025.6 at 1K, 4,850.8 at 8K, 7,230.9 at 32K, and 352.2 vision prompt
+tokens/s. The prompt results are close to the earlier run. The report records
+the installed config hash and 260,000-token context; all answer checks passed.
 
 All three vision requests answered `red` in both main runs. All 1K, 8K and 32K
 prompt requests answered `BENCHMARK-ACK`. The final server's image encoder was
@@ -41,3 +46,5 @@ tokens on the old server and 108 on the new server, despite a 256-token cap.
 - [Temporary 32K report](20261103-211118-fork-prefill-32768-quality-safe.json)
 - [Final 32K installed report](20261103-211344-fork-final-32768.json)
 - [Final short report](20261103-211344-fork-final-32768.md)
+- [Replacement installation report](20261103-213349-installed-fork-replacement.json)
+- [Replacement short report](20261103-213349-installed-fork-replacement.md)

@@ -1,5 +1,5 @@
 {
-  "exe": "/home/spark/Desktop/Strata/build-5090-iq4xs/strata",
+  "exe": "/home/spark/Apps/Strata/engine/strata",
   "args": [
     "--pack", "/home/spark/Apps/Strata/packs/orca-iq4_xs",
     "--native", "/home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Uncensored-IQ4_XS-00001-of-00003.gguf",
@@ -19,7 +19,7 @@
     "--vision",
     "--vram-reserve-mib", "1024"
   ],
-  "cwd": "/home/spark/Desktop/Strata",
+  "cwd": "/home/spark/Apps/Strata",
   "tokenizer": "/home/spark/Apps/Strata/packs/orca-iq4_xs/tokenizer",
   "chat_template": "/home/spark/Apps/MODELS/qwen38-fixed-chat-template.jinja",
   "model_name": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",

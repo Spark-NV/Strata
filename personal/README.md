@@ -11,6 +11,12 @@ cmake -S . -B build-5090-iq4xs -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build-5090-iq4xs --target strata -j8
 ```
 
+The active installation is `/home/spark/Apps/Strata`. Its source files are
+overlaid from this fork, and its `engine/strata` is the CUDA `sm_120` build.
+The existing model pack, MTP files, learned profile and virtual environment
+remain in that directory. The service runs entirely from that installation;
+this checkout is the development copy.
+
 `rtx5090-orca-iq4xs.json` keeps the old model files, 260,000-token context,
 INT8 KV, 32,768 resident KV cells, 64 GiB expert RAM budget, sampling defaults
 and 4-token MTP draft setting. It uses a 32,768-token prompt chunk, keeps the
