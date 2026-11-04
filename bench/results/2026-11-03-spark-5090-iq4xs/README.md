@@ -7,7 +7,7 @@ MTP layer and image encoder. The old server used engine 0.1.39; the replacement
 is engine 0.1.56 built from commit `ffa80d73` for `sm_120`. Both used a 260,000
 token context, INT8 KV and a 64 GiB expert RAM budget.
 
-The external `/home/spark/Apps/Strata-Bench/strata_benchmark.py` sent one warmup
+The benchmark in [`bench/api/strata_benchmark.py`](../../api/strata_benchmark.py) sent one warmup
 and three measured requests per case to the local server. It used temperature
 zero and no reasoning. The GPU was otherwise idle. Values are medians from the
 server's timing records, in tokens per second. The raw reports contain the
