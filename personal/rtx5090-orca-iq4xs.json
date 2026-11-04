@@ -9,7 +9,7 @@
     "--expert-cache", "auto",
     "--mmap-experts",
     "--resident-budget-gib", "64",
-    "--prefill", "16384",
+    "--prefill", "32768",
     "--spec", "4",
     "--spec-min-p", "0.5",
     "--mtp", "/home/spark/Apps/Strata/mtp/rt",

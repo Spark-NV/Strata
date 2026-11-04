@@ -13,7 +13,7 @@ cmake --build build-5090-iq4xs --target strata -j8
 
 `rtx5090-orca-iq4xs.json` keeps the old model files, 260,000-token context,
 INT8 KV, 32,768 resident KV cells, 64 GiB expert RAM budget, sampling defaults
-and 4-token MTP draft setting. It uses a 16,384-token prompt chunk, keeps the
+and 4-token MTP draft setting. It uses a 32,768-token prompt chunk, keeps the
 image reader on the GPU from startup, and disables route tail skipping and
 short-prompt CPU expert sharing. Both disabled defaults can change answers;
 they were absent from the old 0.1.39 engine. The learned expert profile is
