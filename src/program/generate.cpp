@@ -9920,6 +9920,16 @@ int main(int argc, char** argv) {
             else
                 err = whole_err + "; " + err;
         }
+        // The look-ahead only warms the file tier's pages.  With every expert in VRAM or in the pinned RAM copy that
+        // tier is never read, and the predictor thread (the next layer's router in BF16 on the CPU) only takes a core and
+        // memory bandwidth from the expert pool: 15.8 against 17.5 ms per decode window on a 7800X3D + RTX 5090 with
+        // IQ4_XS.  STRATA_LOOKAHEAD=1 keeps it on.
+        if (resident_ok && drive.d.lookahead != nullptr && !fs_ahead && !la_stats && src.complement_whole() &&
+            std::getenv("STRATA_LOOKAHEAD") == nullptr) {
+            drive.d.lookahead = nullptr;
+            std::fprintf(stderr, "strata generate: routing-aware prefetch off: every expert is in VRAM or the pinned RAM "
+                                 "copy, nothing is read from the file (STRATA_LOOKAHEAD=1 keeps it)\n");
+        }
         // the startup reads are done: the view of experts.bin back, the file tier as chosen above
         bool startup_kept = false;
         if (src.startup_unbuffered()) {

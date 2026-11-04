@@ -6,9 +6,10 @@ MTP draft layer and image encoder already installed under `/home/spark/Apps`.
 The engine is built from this checkout for CUDA `sm_120`:
 
 ```sh
-cmake -S . -B build-5090-iq4xs -G Ninja -DCMAKE_BUILD_TYPE=Release \
+cmake -S . -B build-5090 -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DSTRATA_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120 -DSTRATA_BUILD_TESTS=OFF
-cmake --build build-5090-iq4xs --target strata -j8
+cmake --build build-5090 --target strata -j16
+install -m 755 build-5090/strata engine/strata
 ```
 
 The GPU image reader is built from the fork's `tools/vision` source with the
@@ -17,8 +18,7 @@ pinned llama.cpp revision in `setup.py`, CUDA architecture `120`, and
 `engine/strata-vision`.
 
 The active installation and fork checkout are both `/home/spark/Apps/Strata`.
-`/home/spark/Desktop/Strata` is a link to the same directory for existing
-workspace paths. Its `engine/strata` is the CUDA `sm_120` build. The model
+Its `engine/strata` is the CUDA `sm_120` build. The model
 pack, MTP files, learned profile and virtual environment are in this one
 installation.
 
@@ -42,3 +42,9 @@ After changing the installed unit, run `systemctl --user daemon-reload` and
 
 The measured comparison and raw API benchmark records are in
 [`bench/results/2026-11-03-spark-5090-iq4xs`](../bench/results/2026-11-03-spark-5090-iq4xs/README.md).
+
+The engine turns off the router look-ahead by itself here: with every expert
+in VRAM or the pinned RAM copy it only warms file pages that are never read,
+and it slowed decode windows from 15.8 to 17.5 ms. On Linux the mapped PLE
+table is advised `MADV_RANDOM` and the drafted tokens' rows are read ahead.
+Both changes are measured in the results README below.

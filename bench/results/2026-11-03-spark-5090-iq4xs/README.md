@@ -106,3 +106,59 @@ zero reused tokens for every measured request.
 - [Installed overlap API report](20261103-220322-installed-adapt-overlap.json)
 - [Installed overlap repeat](20261103-220417-installed-adapt-overlap-repeat.json)
 - [Embedding boundary fix benchmark](20261103-223149-embedding-boundary-fix-5090-iq4xs.json)
+
+## PLE reads and the file-tier look-ahead (2026-11-03, second session)
+
+`STRATA_DECODE_TIMING=1` splits each decode window into its parts. A fixed
+256-token probe ([`session2/probe.py`](session2/probe.py), a story and a
+code prompt, eight runs each, the first two dropped) ran on a server
+started per arm by [`session2/ab.py`](session2/ab.py). Same model, config
+and 260,000-token context. A window took 17.4 ms on the installed engine.
+About 6-7 ms of it was the CPU pool computing the experts the VRAM cache
+missed (1.8 per layer and window), with the GPU waiting.
+
+Two fixes, both for Linux with every expert in VRAM or pinned RAM:
+
+- **PLE table reads.** On Linux the mapped PLE table (28.8 GB of random
+  90-byte rows) had no `MADV_RANDOM`, so each row fault read ahead about
+  128 KiB from the SATA SSD (142 us median per random 4 KiB read here).
+  `prefetch_rows` did nothing on Linux. Now the table is `MADV_RANDOM` and
+  the drafted tokens' rows get `MADV_WILLNEED` before the window. Host
+  staging per window fell from 0.31 to 0.10 ms, the per-layer host time
+  from 7.07 to 6.53 ms, and the window from 17.42 to 16.94 ms.
+- **The look-ahead thread.** The router look-ahead predicts the next
+  layer's experts on the CPU to warm the file tier's pages. Here no expert
+  is read from the file, so the thread only took a core and memory
+  bandwidth from the expert pool (6% of the sampled CPU time, as much as
+  the IQ4_NL down kernel). It is now off when the pinned RAM copy holds
+  every expert the GPU does not (`STRATA_LOOKAHEAD=1` keeps it). The window
+  fell from 17.5 to 15.8 ms.
+
+| Probe (median tok/s) | Before | PLE fix | PLE fix + look-ahead off |
+| --- | ---: | ---: | ---: |
+| Story, 256 tokens | 162.1 | 172.9 / 166.9 | 179.1 / 178.2 |
+| Code, 256 tokens | 167.0 | 163.1 / 158.1 | 174.0 / 170.9 |
+
+The two numbers per cell are two separate server starts. Every probe
+request returned 256 tokens. The code answers matched the old engine's
+8 of 8. The story answers matched 3 of 8. Two starts of the same engine
+also matched only 2 to 4 of 8, because the GPU and the CPU round a missed
+expert differently and the cache holds different experts on each start.
+Prompt speed did not change (8K-word prompts 5,216-5,894 tok/s, 52K-token
+prompts 7,353-7,603 tok/s, all `BENCHMARK-ACK`).
+
+Tried and not kept: `--pcie-frac` 0.25 / 0.75 / 1.0 gave 18.0 / 17.8 /
+19.3 ms windows against about 17 ms for the automatic share near 0.5. The
+Foresight swap space (`STRATA_FS_SLOTS=4`, reserve raised by 512 MiB) gave
+18.4 ms: its CPU predictor took 51 ms per window and had no prediction
+for 84% of the layers.
+
+The installed engine then ran the API benchmark: 182.9 decode tok/s
+(108-121 output tokens), 1,054.7 at 1K, 4,961.6 at 8K, 7,470.9 at 32K
+and 385.5 vision prompt tok/s. The same benchmark at the start of the
+session gave 162.2, 1,117.2, 5,100.6, 7,258.2 and 402.4. All vision
+answers were `red` and all prompt answers `BENCHMARK-ACK`.
+
+- [Session start report](20261103-224850-baseline-session2.json)
+- [Installed report](20261103-234036-ple-lookahead-5090-iq4xs.json)
+- [Probe answers and window timings per arm](session2/)

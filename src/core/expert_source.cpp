@@ -4179,6 +4179,15 @@ bool FileExpertSource::pin_cache_complement(
     complement_lent_slots_ = lend ? n_slots - keep_from : budget_lent;   // a budget keeps its own tail of the region
     complement_lent_slots_ += stage_lent;   // and the split stages' regions: pairs the copy kept of them
     complement_ready_ = true;
+    {   // every expert the GPU cache does not hold has its RAM copy: the file tier is never read in decode
+        std::vector<uint8_t> on_gpu(complement_offsets_.size(), 0);
+        for (const auto& pr : primary_gpu_pairs) on_gpu[(size_t) pr.first * (size_t) n_expert_ + (size_t) pr.second] = 1;
+        for (const auto& pr : additional_gpu_pairs)
+            if (pr.first >= 0 && pr.second >= 0) on_gpu[(size_t) pr.first * (size_t) n_expert_ + (size_t) pr.second] = 1;
+        complement_whole_ = !complement_offsets_.empty();
+        for (size_t i = 0; i < complement_offsets_.size() && complement_whole_; ++i)
+            if (complement_offsets_[i] == detail::kNoCacheComplement && on_gpu[i] == 0) complement_whole_ = false;
+    }
     std::fprintf(stderr, "FileExpertSource: %s cache complement ready: resident %.2f GiB, pinned %.2f GiB in %.0f s%s%s\n",
                  complement_pinned_ ? "mapped pinned" : pin ? "locked resident" : "pageable resident",
                  (double) resident_bytes() / 1073741824.0, (double) pinned_bytes() / 1073741824.0,

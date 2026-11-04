@@ -775,6 +775,8 @@ public:
     uint64_t resident_bytes() const { return complement_bytes_; }
     bool complement_pinned() const { return complement_pinned_; }
     bool complement_ready() const { return complement_ready_; }
+    /// The RAM copy holds every expert the GPU cache does not (set by pin_cache_complement; exchanges keep it so).
+    bool complement_whole() const { return complement_ready_ && complement_whole_; }
     uint64_t locked_bytes() const { return complement_locked_; }
     /// Lend-region slots whose experts the compact copy holds (the last ones of the cache).
     int64_t resident_lent_slots() const { return complement_lent_slots_; }
@@ -1206,6 +1208,7 @@ private:
     const uint8_t* complement_host_ = nullptr;
     const uint8_t* complement_device_ = nullptr;
     uint64_t complement_bytes_ = 0;
+    bool complement_whole_ = false;
     std::vector<uint64_t> complement_offsets_;
     detail::ExchangeStorage exchange_storage_; // authoritative when active; original arenas still own memory
     bool complement_pinned_ = false;

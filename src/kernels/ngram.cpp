@@ -485,6 +485,18 @@ bool PleTable::open(const std::string& gguf_path, std::string& err, const PleIoO
         }
 #endif
     }
+#if !defined(_WIN32)
+    // Linux, an unlocked mapped table: a token's 16 rows sit in 16 random pages of 28.8 GB, so the kernel's default
+    // fault read-around (32+ pages) reads ~128 KiB to deliver 90 B and evicts useful pages.  MADV_RANDOM makes a
+    // fault read its one page; prefetch_rows asks for exactly the rows' pages ahead of the window (MADV_WILLNEED).
+    // Advice only: a page it does not fetch is faulted by the read, so no value changes.
+    if (io.mode == PleIo::Mmap && !impl_->locked && impl_->data != nullptr) {
+        const uintptr_t a0 = (uintptr_t) impl_->data & ~(uintptr_t) 4095;
+        const uintptr_t a1 = (uintptr_t) impl_->data + (uintptr_t) (impl_->n_rows * (uint64_t) impl_->rb);
+        if (madvise((void*) a0, a1 - a0, MADV_RANDOM) != 0)
+            std::fprintf(stderr, "strata: PLE table madvise(MADV_RANDOM) failed (%s)\n", std::strerror(errno));
+    }
+#endif
     impl_->mode = io.mode;
     return true;
 }
@@ -519,6 +531,17 @@ void PleTable::prefetch_rows(const uint32_t* rows16) {
             ++n;
         }
         if (n > 0) (void) PrefetchVirtualMemory(GetCurrentProcess(), n, ranges, 0);
+    }
+#else
+    // Linux: the rows' pages, read ahead while the drafter and the window's first layer run (see the MADV_RANDOM
+    // note in open).  A locked table is resident already.
+    if (impl_->data != nullptr && g_ple_prefetch && !impl_->locked) {
+        for (int h = 0; h < PLE_N_HEADS; ++h) {
+            if (rows16[h] >= impl_->n_rows) continue;
+            const uintptr_t r0 = (uintptr_t) (impl_->data + (size_t) rows16[h] * impl_->rb);
+            const uintptr_t p0 = r0 & ~(uintptr_t) 4095;
+            (void) madvise((void*) p0, (size_t) (r0 + impl_->rb - p0), MADV_WILLNEED);
+        }
     }
 #endif
 }
