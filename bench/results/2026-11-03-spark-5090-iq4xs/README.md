@@ -41,6 +41,27 @@ measured 141.0 decode, 1,061.9 at 1K, 4,933.0 at 8K, 7,498.8 at 32K, and
 376.4 vision prompt tokens/s. The vision answer was `red` in all three runs.
 These differences are from short runs and may include normal run-to-run noise.
 
+## Resident expert swap overlap (2026-11-03)
+
+With the same model, context and resident RAM mode, we tested
+`STRATA_ADAPT_OVERLAP=1` and `STRATA_ADAPT_OVERLAP_RESIDENT=1`. The source says
+a layer waits for its expert copies before using them. A fixed 256-token story
+prompt gave a more stable decode length than the benchmark's word-list case.
+After discarding the first six of 11 runs in each sequence, the median decode
+rates were 174.5 tok/s with overlap off, 191.8 tok/s with it on after a fresh
+restart (+9.9%), and 176.8 tok/s with it off again. A separate overlap start
+measured 193.9 tok/s, and the installed overlap service measured 183.6 tok/s.
+Every story request returned 256 tokens. One output preview varied once with
+overlap off and once in each overlap sequence, so these runs do not show a
+change unique to the switch. They do not prove full answer identity.
+
+The full API benchmark with overlap on measured 148.5 decode tok/s, 976.8 at
+1K, 4,847.2 at 8K, 7,304.1 at 32K, and 353.7 vision prompt tok/s. A repeat
+measured 133.2 decode tok/s (the word-list answer ended at 59 tokens), 1,058.1
+at 1K, 4,874.5 at 8K, 7,652.0 at 32K, and 392.9 vision prompt tok/s. All
+vision and `BENCHMARK-ACK` checks passed. The prompt and vision rates varied
+across these short runs; the overlap switch affects decode scheduling.
+
 All three vision requests answered `red` in both main runs. All 1K, 8K and 32K
 prompt requests answered `BENCHMARK-ACK`. The final server's image encoder was
 confirmed running with `--gpu`; route tail skipping and CPU expert sharing were
@@ -57,3 +78,7 @@ tokens on the old server and 108 on the new server, despite a 256-token cap.
 - [Replacement short report](20261103-213349-installed-fork-replacement.md)
 - [Single fork installation report](20261103-214548-single-fork-install-new-vision.json)
 - [Single fork installation short report](20261103-214548-single-fork-install-new-vision.md)
+- [Overlap fixed-length decode runs](2026-11-03-adapt-overlap-fixed256.json)
+- [Overlap temporary API report](20261103-215624-adapt-overlap-resident.json)
+- [Installed overlap API report](20261103-220322-installed-adapt-overlap.json)
+- [Installed overlap repeat](20261103-220417-installed-adapt-overlap-repeat.json)

@@ -30,6 +30,11 @@ short-prompt CPU expert sharing. Both disabled defaults can change answers;
 they were absent from the old 0.1.39 engine. The learned expert profile is
 reused and saved across restarts.
 
+`STRATA_ADAPT_OVERLAP=1` and `STRATA_ADAPT_OVERLAP_RESIDENT=1` let the
+resident RAM tier copy experts while the next decode window runs. Each layer
+waits for its own copy before use. This improved the fixed-length decode probe
+on this PC; the paired measurements are linked below.
+
 The user service copy is `qwen-orca-iq4xs.service`. The installed unit is at
 `~/.config/systemd/user/qwen-orca-iq4xs.service` and serves on `127.0.0.1:8082`.
 After changing the installed unit, run `systemctl --user daemon-reload` and
