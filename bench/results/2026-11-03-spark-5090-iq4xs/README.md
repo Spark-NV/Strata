@@ -287,3 +287,30 @@ word-list case (121 tokens), 1,064.5 at 1K, 4,895.0 at 8K, 7,233.1 at 32K,
 answers were `red` and all prompt answers `BENCHMARK-ACK`.
 
 - [Installed report](20261104-010950-rotate-adapt2-5090-iq4xs.json)
+
+## The hyper-connection up read in 8-column blocks (2026-11-04)
+
+In the profiled verify windows the two hyper-connection reads per layer
+(`gr_down_v3` + `gr_up_v3`) took about 19% of the GPU time. The up read ran as
+160 blocks of 16 columns: fewer blocks than the RTX 5090's 170 SMs. New bit
+512 of `STRATA_GR_V3_PF` runs it as 320 blocks of 8 columns. Each output has
+the same rows, lanes and order, so the results are bitwise the old read's.
+It is now on by default on compute capability 12.0 (mask 133 | 512).
+
+`gr_v3_screen` (cold weights, 16 weight sets, median of 5 rounds; RTX 5090;
+[`session2/gr_v3_screen_cols8.txt`](session2/gr_v3_screen_cols8.txt)): `0 differing`, and
+
+| Window tokens | Up read before (us) | After (us) | Whole read before (us) | After (us) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 8.58 | 7.04 | 15.85 | 13.77 |
+| 2 | 9.38 | 7.20 | 16.72 | 14.36 |
+| 4 | 12.00 | 8.61 | 21.73 | 18.60 |
+| 8 | 14.37 | 11.17 | 29.21 | 26.20 |
+
+Four columns per block (640 blocks) was faster only at 1 and 3 tokens, and
+the column-half split of the down read (`S = 2`) was slower at every window
+size; neither is kept. In two alternating pairs of server starts the GPU
+part of a window (the host waiting for the GPU) fell from 5.94 / 6.01 to
+5.77 / 5.66 ms. Decode tok/s, story / code / 16 topics: before 183.4 /
+197.0 / 126.2 and 179.9 / 193.8 / 125.2; after 188.8 / 203.2 / 125.6 and
+184.8 / 179.9 / 123.4 (the second code run had one 145 tok/s request).

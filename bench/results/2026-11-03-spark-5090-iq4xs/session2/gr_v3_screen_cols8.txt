@@ -1,0 +1,9 @@
+T 1 cold(16 sets) read us:  pf0  16.09 (down  7.55 up  8.77)  pf133  15.59 (down  7.23 up  8.58)  pf645  14.07 (down  7.26 up  7.04)  pf1157  13.74 (down  7.23 up  6.50)   [stamps include a ~1-2 us stamp kernel each]
+T 2 cold(16 sets) read us:  pf0  19.22 (down  8.86 up 10.62)  pf133  17.38 (down  8.29 up  9.38)  pf645  15.02 (down  8.29 up  7.20)  pf1157  15.32 (down  8.26 up  7.07)   [stamps include a ~1-2 us stamp kernel each]
+T 3 cold(16 sets) read us:  pf0  21.32 (down 10.02 up 11.58)  pf133  19.85 (down  9.28 up 10.59)  pf645  17.38 (down  9.44 up  8.16)  pf1157  16.78 (down  9.38 up  7.49)   [stamps include a ~1-2 us stamp kernel each]
+T 4 cold(16 sets) read us:  pf0  25.19 (down 11.62 up 13.54)  pf133  21.81 (down  9.82 up 12.03)  pf645  18.38 (down  9.89 up  8.77)  pf1157  20.29 (down  9.92 up 10.62)   [stamps include a ~1-2 us stamp kernel each]
+T 5 cold(16 sets) read us:  pf0  30.03 (down 16.77 up 12.90)  pf133  23.24 (down 11.30 up 12.03)  pf645  20.10 (down 11.33 up  8.96)  pf1157  22.18 (down 11.33 up 10.91)   [stamps include a ~1-2 us stamp kernel each]
+T 6 cold(16 sets) read us:  pf0  64.11 (down 47.68 up 13.63)  pf133  25.57 (down 12.70 up 12.74)  pf645  22.27 (down 12.74 up  9.50)  pf1157  24.96 (down 12.70 up 12.32)   [stamps include a ~1-2 us stamp kernel each]
+T 7 cold(16 sets) read us:  pf0  82.87 (down 63.52 up 15.68)  pf133  26.06 (down 13.12 up 12.86)  pf645  23.18 (down 13.15 up 10.14)  pf1157  25.97 (down 13.12 up 12.22)   [stamps include a ~1-2 us stamp kernel each]
+T 8 cold(16 sets) read us:  pf0  91.90 (down 70.66 up 16.61)  pf133  29.15 (down 14.34 up 14.37)  pf645  25.96 (down 14.37 up 11.17)  pf1157  28.71 (down 14.37 up 13.86)   [stamps include a ~1-2 us stamp kernel each]
+gr_v3_screen: 0 differing

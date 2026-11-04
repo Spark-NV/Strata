@@ -964,23 +964,23 @@ __global__ void __launch_bounds__(THREADS) gr_down_v3_kernel(GrMulti m, float* _
 // PF (BW-DENSE, bitwise the PF = 0 kernel): bit 0 issues the loads of the partial sums and of every row's R / w_norm / bo / inj before
 // their first use (the in-place store of R in the row loop otherwise ends each row's loads at a full latency); bit 1 loads the
 // warp's w_up rows first. S == 1, EXACT_T only.
-template <int S, int MAX_T = kFusedGrMaxT, bool EXACT_T = false, int PF = 0>
+template <int S, int MAX_T = kFusedGrMaxT, bool EXACT_T = false, int PF = 0, int COLS = UPM_COLS>
 __global__ void __launch_bounds__(THREADS) gr_up_v3_kernel(GrMulti m, const float* __restrict__ part,
                                                            const float* __restrict__ ssg) {
     __shared__ __align__(16) float lo[MAX_T][LR];
     __shared__ float rsS[MAX_T][HC];
-    __shared__ float g[MAX_T][HC][UPM_COLS];
+    __shared__ float g[MAX_T][HC][COLS];
     const int t = threadIdx.x, lane = t & 31, warp = t >> 5;
     const int T = EXACT_T ? MAX_T : m.T;
-    const int d0 = blockIdx.x * UPM_COLS;
-    constexpr int RPW = HC * UPM_COLS / WARPS;     // 8 rows per warp
+    const int d0 = blockIdx.x * COLS;
+    constexpr int RPW = HC * COLS / WARPS;     // 8 rows per warp
     uint4 pwa[(PF & 2) ? RPW : 1], pwb[(PF & 2) ? RPW : 1];   // PF bit 1: the warp's 8 rows of w_up, loaded before the prologue
     if constexpr (PF != 0) static_assert(S == 1 && EXACT_T, "the prefetch variants are for the exact-T, one-half kernels");
     if constexpr ((PF & 2) != 0) {
 #pragma unroll
         for (int q = 0; q < RPW; ++q) {
             const int r = warp + q * WARPS;
-            const int c = r / UPM_COLS, dd = r - c * UPM_COLS, i = c * N + d0 + dd;
+            const int c = r / COLS, dd = r - c * COLS, i = c * N + d0 + dd;
             const uint4* w4 = reinterpret_cast<const uint4*>(m.a[0].w_up + (size_t) i * LR);
             pwa[q] = ldg_v4(w4 + lane);
             pwb[q] = lane < LR / 8 - 32 ? ldg_v4(w4 + 32 + lane) : make_uint4(0, 0, 0, 0);
@@ -1007,7 +1007,7 @@ __global__ void __launch_bounds__(THREADS) gr_up_v3_kernel(GrMulti m, const floa
 #pragma unroll
             for (int q = 0; q < RPW; ++q) {
                 const int r = warp + q * WARPS;
-                const int c = r / UPM_COLS, dd = r - c * UPM_COLS, i = c * N + d0 + dd;
+                const int c = r / COLS, dd = r - c * COLS, i = c * N + d0 + dd;
                 prv[q] = a.R[i];
                 pwn[q] = a.w_norm[i];
                 pbo[q] = 0.0f;
@@ -1075,7 +1075,7 @@ __global__ void __launch_bounds__(THREADS) gr_up_v3_kernel(GrMulti m, const floa
 #pragma unroll
     for (int q = 0; q < RPW; ++q) {
         const int r = warp + q * WARPS;
-        const int c = r / UPM_COLS, dd = r - c * UPM_COLS, i = c * N + d0 + dd;
+        const int c = r / COLS, dd = r - c * COLS, i = c * N + d0 + dd;
         Bf16x8 wa, wb;
         if constexpr ((PF & 2) != 0) {
             wa = unpack8(pwa[q]);
@@ -1128,8 +1128,8 @@ __global__ void __launch_bounds__(THREADS) gr_up_v3_kernel(GrMulti m, const floa
         }
     }
     __syncthreads();
-    for (int i = t; i < T * UPM_COLS; i += THREADS) {
-        const int k = i / UPM_COLS, col = i - k * UPM_COLS;
+    for (int i = t; i < T * COLS; i += THREADS) {
+        const int k = i / COLS, col = i - k * COLS;
         float sum = 0.0f;
 #pragma unroll
         for (int c = 0; c < HC; ++c) sum += g[k][c][col];
@@ -2781,18 +2781,30 @@ static bool gr_down_pf_dispatch(int pf, int n_tok, const GrMulti& m, float* part
     default: return false;
     }
 }
-template <int PF>
+// STRATA_GR_V3_PF bit 512: the up read in blocks of 8 columns (x 4 streams = 32 rows, 4 per warp) instead of 16, so an
+// RTX 5090's 170 SMs get 320 blocks instead of 160.  Each output is the same rows, lanes and order: bitwise (gr_v3_screen).
+template <int PF, int COLS = UPM_COLS>
 static bool gr_up_pf_dispatch_k(int n_tok, const GrMulti& m, const float* part, const float* ssg, cudaStream_t st) {
-#define GR_UP_PF(K) case K: gr_up_v3_kernel<1, K, true, PF><<<UPM_BLOCKS, THREADS, 0, st>>>(m, part, ssg); return true;
+    constexpr int B = N / COLS;
+#define GR_UP_PF(K) case K: gr_up_v3_kernel<1, K, true, PF, COLS><<<B, THREADS, 0, st>>>(m, part, ssg); return true;
     switch (n_tok) {
     GR_UP_PF(1) GR_UP_PF(2) GR_UP_PF(3) GR_UP_PF(4) GR_UP_PF(5) GR_UP_PF(6)
-    case 7: if (kFusedGrMaxT >= 7) { gr_up_v3_kernel<1, 7, true, PF><<<UPM_BLOCKS, THREADS, 0, st>>>(m, part, ssg); return true; } return false;
-    case 8: if (kFusedGrMaxT >= 8) { gr_up_v3_kernel<1, 8, true, PF><<<UPM_BLOCKS, THREADS, 0, st>>>(m, part, ssg); return true; } return false;
+    case 7: if (kFusedGrMaxT >= 7) { gr_up_v3_kernel<1, 7, true, PF, COLS><<<B, THREADS, 0, st>>>(m, part, ssg); return true; } return false;
+    case 8: if (kFusedGrMaxT >= 8) { gr_up_v3_kernel<1, 8, true, PF, COLS><<<B, THREADS, 0, st>>>(m, part, ssg); return true; } return false;
     default: return false;
     }
 #undef GR_UP_PF
 }
-static bool gr_up_pf_dispatch(int pf, int n_tok, const GrMulti& m, const float* part, const float* ssg, cudaStream_t st) {
+static bool gr_up_pf_dispatch(int pf, int n_tok, const GrMulti& m, const float* part, const float* ssg, cudaStream_t st,
+                              int cols = UPM_COLS) {
+    if (cols == 8) {
+        switch (pf & 3) {
+        case 1: return gr_up_pf_dispatch_k<1, 8>(n_tok, m, part, ssg, st);
+        case 2: return gr_up_pf_dispatch_k<2, 8>(n_tok, m, part, ssg, st);
+        case 3: return gr_up_pf_dispatch_k<3, 8>(n_tok, m, part, ssg, st);
+        default: return false;
+        }
+    }
     switch (pf & 3) {
     case 1: return gr_up_pf_dispatch_k<1>(n_tok, m, part, ssg, st);
     case 2: return gr_up_pf_dispatch_k<2>(n_tok, m, part, ssg, st);
@@ -2922,7 +2934,8 @@ static bool fused_gr_read_multi_slice(const FusedGrArgs* a, int n_tok, float* xn
         else gr_down_v3_kernel<1, kFusedGrMaxT, false><<<dim3(LR / WARPS + 1, HC), THREADS, sm, st>>>(m, part, ssg);
         if (stamp_buf) gpu_stamp(stamp_buf, stamp_i0 + 1, stream);
         if (split == 2) gr_up_v3_kernel<2><<<UPM_BLOCKS, THREADS, 0, st>>>(m, part, ssg);
-        else if (((pfm >> 2) & 3) != 0 && gr_up_pf_dispatch((pfm >> 2) & 3, n_tok, m, part, ssg, st)) {}
+        else if (((pfm >> 2) & 3) != 0 && gr_up_pf_dispatch((pfm >> 2) & 3, n_tok, m, part, ssg, st,
+                                                                     (pfm & 512) != 0 ? 8 : UPM_COLS)) {}
         else if (n_tok == 1) gr_up_v3_kernel<1, 1, true><<<UPM_BLOCKS, THREADS, 0, st>>>(m, part, ssg);
         else if (n_tok == 2) gr_up_v3_kernel<1, 2, true><<<UPM_BLOCKS, THREADS, 0, st>>>(m, part, ssg);
         else if (n_tok == 3) gr_up_v3_kernel<1, 3, true><<<UPM_BLOCKS, THREADS, 0, st>>>(m, part, ssg);
