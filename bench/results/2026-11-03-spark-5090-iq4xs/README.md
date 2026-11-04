@@ -69,6 +69,29 @@ disabled. This is a speed and smoke check, not a full quality evaluation or a
 full-context stress test. The decode case stopped after a median of 103 output
 tokens on the old server and 108 on the new server, despite a 256-token cap.
 
+## Long prompt embedding boundary (2026-11-03)
+
+A temporary 65,536-token prefill chunk failed on a fresh 76K-token prompt with
+`iq_embed_rows: invalid argument`. The embedding kernel launched one CUDA grid
+row per token and exceeded the 65,535-row grid limit. A regression test with
+65,537 BF16 embedding rows reproduced that exact error before the change and
+passed after splitting the launch into groups of at most 65,535 rows. The
+existing short BF16 embedding test passed too.
+
+The rebuilt engine answered a fresh 75,322-token prompt at 7,446.8 prompt
+tok/s with the installed 32,768-token chunk. The temporary 65,536-token chunk
+then answered a fresh 76,122-token prompt at 7,274.7 prompt tok/s, where it
+previously failed. Both requests returned `BENCHMARK-ACK` with no reused KV.
+The larger chunk reduced the GPU KV window from 32,768 to 4,096 tokens on this
+card and showed no prompt speed gain in this check, so the installed profile
+still uses 32,768. Both configurations kept the 260,000-token context.
+
+The installed engine then ran the external benchmark with three measured runs
+per case. Median rates were 154.6 decode tok/s, 1,036.0 at 1K, 4,804.4 at 8K,
+7,423.4 at 32K, and 356.5 vision prompt tok/s. All three vision answers were
+`red`; all nine prefill answers were `BENCHMARK-ACK`. The raw report records
+zero reused tokens for every measured request.
+
 - [Old raw report](baseline-old-0139.json)
 - [First 16K installed report](20261103-210634-fork-final-5090-iq4xs.json)
 - [Temporary 32K report](20261103-211118-fork-prefill-32768-quality-safe.json)
@@ -82,3 +105,4 @@ tokens on the old server and 108 on the new server, despite a 256-token cap.
 - [Overlap temporary API report](20261103-215624-adapt-overlap-resident.json)
 - [Installed overlap API report](20261103-220322-installed-adapt-overlap.json)
 - [Installed overlap repeat](20261103-220417-installed-adapt-overlap-repeat.json)
+- [Embedding boundary fix benchmark](20261103-223149-embedding-boundary-fix-5090-iq4xs.json)

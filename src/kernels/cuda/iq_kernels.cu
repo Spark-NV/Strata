@@ -5396,9 +5396,15 @@ void iq_embed_rows(int t, const void* table, size_t row_bytes, const int32_t* to
                    float* out, void* stream) {
     if (n_tok <= 0) return;
     if (n_embd % 256 != 0 || !embed_type_supported(t)) { std::fprintf(stderr, "iq_embed_rows: bad arguments\n"); std::exit(1); }
-    embed_rows_kernel<<<dim3((unsigned) (n_embd / 256), (unsigned) n_tok), 32, 0, (cudaStream_t) stream>>>(
-        t, (const uint8_t*) table, row_bytes, tokens, n_embd, out);
-    check("iq_embed_rows");
+    // CUDA grid.y is limited to 65,535 blocks. A long prefill can exceed that
+    // even though each embedding row is independent.
+    for (int64_t offset = 0; offset < n_tok;) {
+        const int64_t batch = n_tok - offset < 65535 ? n_tok - offset : 65535;
+        embed_rows_kernel<<<dim3((unsigned) (n_embd / 256), (unsigned) batch), 32, 0, (cudaStream_t) stream>>>(
+            t, (const uint8_t*) table, row_bytes, tokens + offset, n_embd, out + offset * n_embd);
+        check("iq_embed_rows");
+        offset += batch;
+    }
 }
 
 void iq_dequant_f32(int t, const void* src, int64_t n, float* dst, void* stream) {

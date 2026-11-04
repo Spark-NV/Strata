@@ -2700,6 +2700,7 @@ if(STRATA_NATIVE_EXPERTS)
       endif()
       # #290: the BF16 token embedding (--embd-gguf) gathered and dequantized bit for bit
       add_test(NAME native_expert_parity_bf16_embd COMMAND native_expert_parity --bf16-embd)
+      add_test(NAME native_expert_parity_bf16_embd_long COMMAND native_expert_parity --bf16-embd-long)
     endif()
   endif()
   # #296's real-weight checks (OrcaRouter Q4_K_S files; docs/ORCA_Q4_K_S.md) - test programs, not part of a release

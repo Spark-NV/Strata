@@ -652,6 +652,38 @@ int check_bf16_embd(cudaStream_t s) {
     return failures;
 }
 
+// A 65,536-token prefill crosses CUDA's 65,535-block Y-grid limit. The token
+// embedding gather must produce the same rows on both sides of that boundary.
+int check_bf16_embd_long(cudaStream_t s) {
+    constexpr int64_t width = 256, count = 65537;
+    constexpr uint16_t one = 0x3f80, two = 0x4000;
+    std::vector<uint16_t> table((size_t) (2 * width), one);
+    std::fill(table.begin() + width, table.end(), two);
+    std::vector<int32_t> tokens((size_t) count);
+    for (int64_t i = 0; i < count; ++i) tokens[(size_t) i] = (int32_t) (i & 1);
+    void* d_table = nullptr;
+    int32_t* d_tokens = nullptr;
+    float* d_out = nullptr;
+    if (cudaMalloc(&d_table, table.size() * sizeof(uint16_t)) != cudaSuccess ||
+        cudaMalloc((void**) &d_tokens, tokens.size() * sizeof(int32_t)) != cudaSuccess ||
+        cudaMalloc((void**) &d_out, (size_t) (count * width) * sizeof(float)) != cudaSuccess)
+        return 1;
+    cudaMemcpy(d_table, table.data(), table.size() * sizeof(uint16_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_tokens, tokens.data(), tokens.size() * sizeof(int32_t), cudaMemcpyHostToDevice);
+    strata::kernels::iq_embed_rows(30, d_table, (size_t) width * 2, d_tokens, count, width, d_out, s);
+    if (cudaStreamSynchronize(s) != cudaSuccess) return 1;
+    int failures = 0;
+    std::vector<float> row((size_t) width);
+    for (int64_t i : {0LL, 65534LL, 65535LL, 65536LL}) {
+        cudaMemcpy(row.data(), d_out + i * width, row.size() * sizeof(float), cudaMemcpyDeviceToHost);
+        const float want = (i & 1) ? 2.f : 1.f;
+        if (!std::all_of(row.begin(), row.end(), [&](float v) { return v == want; })) ++failures;
+    }
+    cudaFree(d_table); cudaFree(d_tokens); cudaFree(d_out);
+    std::printf("bf16 embedding across 65535 rows: %d differing rows\n", failures);
+    return failures;
+}
+
 // APR: a GGUF's token_embd as the engine gathers it (iq_embed_rows, any embed_type_supported type: Gyro-S's Q6_K),
 // `n` random rows against ggml's to_float, bit for bit; then iq_dequant_f32 of one row
 int check_gguf_embd(const char* path, int n, cudaStream_t s) {
@@ -813,6 +845,7 @@ int main(int argc, char** argv) {
                              "       native_expert_parity --synthetic-hadamard GU/DOWN ...   (the same, Hadamard-folded: APR)\n"
                              "       native_expert_parity --q5_1-min\n"
                              "       native_expert_parity --bf16-embd\n"
+                             "       native_expert_parity --bf16-embd-long\n"
                              "       native_expert_parity --load-check <pack> <model.gguf>  (start-up checks, no GPU load)\n"
                              "       native_expert_parity --gguf-embd <model.gguf> [rows]   (token_embd rows vs to_float)\n"
                              "       native_expert_parity --gguf-ple <model.gguf> [tokens]  (PLE rows via PleTable vs to_float)\n");
@@ -841,6 +874,8 @@ int main(int argc, char** argv) {
         failures += check_q5_1_min(s);
     } else if (mode == "--bf16-embd") {
         failures += check_bf16_embd(s);
+    } else if (mode == "--bf16-embd-long") {
+        failures += check_bf16_embd_long(s);
     } else if (mode == "--synthetic" || mode == "--synthetic-hadamard") {
         // --synthetic-hadamard: the same with the layer Hadamard-folded (APR, prism.hadamard): random signs, block 128
         const bool had = mode == "--synthetic-hadamard";
