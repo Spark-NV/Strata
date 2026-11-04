@@ -162,3 +162,93 @@ answers were `red` and all prompt answers `BENCHMARK-ACK`.
 - [Session start report](20261103-224850-baseline-session2.json)
 - [Installed report](20261103-234036-ple-lookahead-5090-iq4xs.json)
 - [Probe answers and window timings per arm](session2/)
+
+## Draft cut-off, swap pace and the CPU-row copy (2026-11-04)
+
+Same probe and A/B runner, plus [`session2/probe2.py`](session2/probe2.py): 16
+different prompts (science, Rust, SQL, a story, history, a recipe, a poem...),
+256 tokens each, the first two dropped, total tokens over total decode time.
+It shows what a topic change costs: the default config decodes the repeated
+story and code prompts at about 175 tok/s and the 16 new topics at about 110,
+because the VRAM cache holds the wrong experts for a new topic and the CPU
+computes more of them.
+
+Kept:
+
+- **`--spec-min-p 0.7`** (was 0.5). Drafting stops sooner, windows are
+  shorter and cheaper (15.8 to 14.1-15.0 ms). Story / code: 0.3 gave
+  165.1 / 168.8, 0.5 gave 178.2 / 170.9 and 179.1 / 174.0, 0.7 gave
+  184.3 / 175.8 and 177.0 / 181.2, 0.8 gave 172.8 / 176.9. A verify window
+  decides every token, so the cut-off changes speed only.
+- **`--adapt-every 8`** (was 4). Each exchange of the adaptive tier copies an
+  expert both ways over PCIe and through RAM, about 21 per window by
+  default, and that traffic slows the CPU pool. Two alternating rounds,
+  medians of story / code / 16 topics:
+
+  | Adaptive tier | Story | Code | 16 topics |
+  | --- | ---: | ---: | ---: |
+  | default (every 4 windows, min gain 1.5) | 174.1, 174.5 | 171.9, 182.5 | 108.1, 111.3 |
+  | `--adapt-every 8` | 179.3, 178.7 | 186.4, 201.3 | 106.4, 106.6 |
+  | `--adapt-every 8 --adapt-min-gain 3` | 184.0, 185.9 | 196.0, 195.2 | 103.9, 105.0 |
+
+  Fewer swaps help when a topic continues and cost a little on the first
+  answer after a change. `--adapt-every 8` is the middle choice. Turning the
+  tier off (`--adapt-every 0`) gave 65.5 / 86.0, and `--adapt-min-gain 6`
+  gave 136.7 / 166.1, so the tier itself is essential.
+- **The CPU rows' copy.** `copy_rows_from_mapped` reads the CPU pool's rows
+  over PCIe, one block a row. Each thread now issues all its loads before
+  its stores. A launch with 1-3 CPU rows took 2.4-3.9 us instead of
+  4.7-5.7 us (the microbenchmark below); the bytes are the same. A kernel
+  test with random hit sets and widths 4-8192 passed.
+
+Tried and not kept (same probe, decode tok/s story / code unless noted):
+
+- `--spec 3` 169.9 / 169.0 and `--spec 5` 170.8 / 164.4 against `--spec 4`.
+- Six switches the docs call exact (`STRATA_EXPDEC`, `STRATA_HC_UPMIX`,
+  `STRATA_B6_MMVQ_ROWS`, `STRATA_GRAPH_PRIO`, `STRATA_QSA_ROWS`,
+  `STRATA_DF_PDL`): three alternating rounds, 176 / 177.5 without and
+  176 / 179 with. The texts matched. No gain worth a default.
+- The prompt-side switches (`STRATA_PF_FUSED_NT=256`, `STRATA_PF_BATCH=256`,
+  `STRATA_PLE_COMPACT`, `STRATA_PLE_COPY_STREAM`, `STRATA_DEQUANT_SIDE`,
+  `STRATA_PREFILL_ROUTED_STREAM`): two slow outliers (2,649 and 5,470
+  prompt tok/s), no clear gain.
+- `STRATA_HC_REQ8=1` (int8 hyper-connection weights, 206 more cache slots):
+  149.6 / 164.9 / 98.9, slower, because the stream-split read does not
+  take int8 weights.
+- A GPU look-ahead written for this test: the verify window ran the next
+  layer's router on the current layer's MoE input and the host copied the
+  predicted experts into Foresight swap slots. It cut the CPU experts per
+  layer-window from 1.65 to 1.17 but copied about 100 experts a window at
+  about 40% precision. That RAM traffic slowed the CPU pool from 45 to
+  31 GB/s and the result was 152.6 / 156.1. The code was removed.
+- Vision off frees about 650 cache slots and gave 184.9 / 187.2 against
+  178 / 171. The on-demand encoder cannot give that VRAM back in the pinned
+  RAM mode (`VRAM: not with the resident low-RAM mode`), so the encoder
+  stays loaded.
+
+The pool now also prints its gate/up, quantization and down time per window
+with `STRATA_DECODE_TIMING=1`: 3.1 + 1.6 ms at 42-46 GB/s of expert bytes,
+against about 58 GB/s that 1 to 8 threads of this CPU read from RAM.
+
+The installed service then gave 175.7 decode tok/s (an 80-token answer),
+1,064.5 at 1K, 4,667.0 at 8K, 7,128.6 at 32K and 379.6 vision prompt
+tok/s, and 104.6 tok/s on the 16 topics. A second benchmark right after it
+gave 131.7, 1,202.3, 5,391.0, 7,510.3 and 442.5: its decode case ran after
+the first run's 32K prompts had moved the cache (hit rate 0.931 against
+0.985). The session's first benchmark repeat showed the same drop with the
+old settings, so the benchmark's decode number depends on what ran before
+it; the fixed-length probes start each server fresh.
+
+- [Installed report](20261104-004907-tuned-policy-5090-iq4xs.json)
+- [Repeat](20261104-005025-tuned-policy-repeat.json)
+
+The CPU-row copy microbenchmark (RTX 5090, 2,000 back-to-back launches of
+rows of 2,560 floats, the GPU's rows given as hits):
+
+| Window tokens | CPU rows | Before (us) | After (us) |
+| ---: | ---: | ---: | ---: |
+| 1 | 1 | 4.71 | 2.42 |
+| 4 | 1 | 4.92 | 2.88 |
+| 4 | 3 | 5.14 | 3.48 |
+| 8 | 3 | 5.71 | 3.88 |
+| 8 | 8 | 5.81 | 5.42 |

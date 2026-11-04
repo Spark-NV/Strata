@@ -255,8 +255,23 @@ __global__ void copy_rows_from_mapped_kernel(float4* __restrict__ dst, const vol
     if (hit) {
         for (int64_t i = threadIdx.x; i < row4; i += blockDim.x) d[i] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
     } else {
-        const volatile float4* sr = src + (int64_t) row * row4;
-        for (int64_t i = threadIdx.x; i < row4; i += blockDim.x) d[i] = const_cast<const float4*>(sr)[i];
+        // the row crosses PCIe: every load of a pass is issued before its stores, so a thread waits one round trip a
+        // pass instead of one per float4 (a 2,560-float row at 128 threads is one pass, 5 loads in flight)
+        const float4* sr = const_cast<const float4*>(src + (int64_t) row * row4);
+        constexpr int U = 8;
+        for (int64_t i0 = threadIdx.x; i0 < row4; i0 += (int64_t) blockDim.x * U) {
+            float4 v[U];
+#pragma unroll
+            for (int u = 0; u < U; ++u) {
+                const int64_t i = i0 + (int64_t) u * blockDim.x;
+                if (i < row4) v[u] = sr[i];
+            }
+#pragma unroll
+            for (int u = 0; u < U; ++u) {
+                const int64_t i = i0 + (int64_t) u * blockDim.x;
+                if (i < row4) d[i] = v[u];
+            }
+        }
     }
 }
 namespace {

@@ -17459,6 +17459,8 @@ int main(int argc, char** argv) {
                                drive.d.pcie_experts};
             };
             const DecSnap ds0 = dec_snap();
+            const double pool_gu0 = pool.ms_multi_gu, pool_q0 = pool.ms_multi_q, pool_dn0 = pool.ms_multi_down;
+            const int64_t pool_b0 = pool.multi_bytes;
             double dt_run = 0, dt_commit = 0, dt_draft = 0;
             double dt_adapt_wait = 0, dt_adapt_join = 0;   // the tier's wait before a window / join after the draft (ms, summed)
             const int64_t dt_sw0 = ajob ? a_swapped : adapt_nswaps;
@@ -18708,6 +18710,10 @@ int main(int argc, char** argv) {
                                  dt_adapt_join / w, dt_other / w, (d1.misses - ds0.misses) / (w * L),
                                  (d1.entries - ds0.entries) / (w * L), (d1.hits - ds0.hits) / (w * L),
                                  (d1.pcie - ds0.pcie) / (w * L), (double) ((ajob ? a_swapped : adapt_nswaps) - dt_sw0) / w);
+                    const double gu = pool.ms_multi_gu - pool_gu0, dn = pool.ms_multi_down - pool_dn0;
+                    std::fprintf(stderr, "strata decode timing: CPU pool per window: gate/up %.3f ms, quant %.3f ms, down %.3f ms, "
+                                         "%.1f GB/s of expert bytes\n", gu / w, (pool.ms_multi_q - pool_q0) / w, dn / w,
+                                 (double) (pool.multi_bytes - pool_b0) / 1e6 / std::max(1e-9, gu + dn));
                 } else {   // Keep the pipeline's existing timing format.
                     std::fprintf(stderr, "strata decode timing: %lld windows, avg T %.2f, %.2f tokens/window, %.2f ms/window = "
                                          "verify %.2f (GPU-reach wait %.2f + per-layer host %.2f [plan %.2f actq %.2f jobs %.2f "

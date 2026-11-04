@@ -11,13 +11,14 @@
     "--resident-budget-gib", "64",
     "--prefill", "32768",
     "--spec", "4",
-    "--spec-min-p", "0.5",
+    "--spec-min-p", "0.7",
     "--mtp", "/home/spark/Apps/Strata/mtp/rt",
     "--max-context", "260000",
     "--kv", "int8",
     "--kv-resident", "32768",
     "--vision",
-    "--vram-reserve-mib", "1024"
+    "--vram-reserve-mib", "1024",
+    "--adapt-every", "8"
   ],
   "cwd": "/home/spark/Apps/Strata",
   "tokenizer": "/home/spark/Apps/Strata/packs/orca-iq4_xs/tokenizer",
