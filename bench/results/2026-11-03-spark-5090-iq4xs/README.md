@@ -314,3 +314,27 @@ part of a window (the host waiting for the GPU) fell from 5.94 / 6.01 to
 5.77 / 5.66 ms. Decode tok/s, story / code / 16 topics: before 183.4 /
 197.0 / 126.2 and 179.9 / 193.8 / 125.2; after 188.8 / 203.2 / 125.6 and
 184.8 / 179.9 / 123.4 (the second code run had one 145 tok/s request).
+
+## Where the second session ended (2026-11-04)
+
+The installed service (engine `32d6e770`, the config in `personal/`) gave
+180.2 decode tok/s on the benchmark's word-list case (89 tokens), 1,043.7
+at 1K, 4,758.4 at 8K, 7,067.6 at 32K and 372.0 vision prompt tok/s; then
+129.8 tok/s over the 16 new topics and 191.2 tok/s on the story probe.
+Prompt speeds across this session's API runs averaged about 1,090 / 4,940 /
+7,280 tok/s at 1K / 8K / 32K, close to the 1,036 / 4,804 / 7,423 the
+previous section measured; the decode changes do not touch the prompt path.
+
+| Decode, tok/s | Start of session | End |
+| --- | ---: | ---: |
+| Story, 256 tokens (median) | 162-166 | 184-191 |
+| Code, 256 tokens (median) | 159-167 | 180-203 |
+| 16 new topics (total) | about 108-111 | 124-130 |
+
+Measured and left for later: the vision encoder's 1.7 GB of VRAM would be
+about 650 more cache slots (+4% story, +9% code with vision off) but the
+encoder can only give it back if the expert cache can shrink in the pinned
+RAM mode; the hyper-connection down read (about 10 us at 4 tokens against
+a 3.6 us bandwidth floor) needs a thread layout whose sums of squares add
+in a different order; a smaller draft vocabulary would cut the draft head
+(133 of each 322 us draft step) at the cost of never drafting rare tokens.
