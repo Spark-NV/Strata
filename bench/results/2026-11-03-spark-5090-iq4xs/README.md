@@ -34,6 +34,13 @@ the user service there, a fresh three-repeat benchmark measured 138.6 decode,
 tokens/s. The prompt results are close to the earlier run. The report records
 the installed config hash and 260,000-token context; all answer checks passed.
 
+The old source checkout and its image reader were then replaced with this
+fork's checkout and a CUDA `sm_120` image reader built from the fork's pinned
+llama.cpp revision. A new three-repeat run from the single installation
+measured 141.0 decode, 1,061.9 at 1K, 4,933.0 at 8K, 7,498.8 at 32K, and
+376.4 vision prompt tokens/s. The vision answer was `red` in all three runs.
+These differences are from short runs and may include normal run-to-run noise.
+
 All three vision requests answered `red` in both main runs. All 1K, 8K and 32K
 prompt requests answered `BENCHMARK-ACK`. The final server's image encoder was
 confirmed running with `--gpu`; route tail skipping and CPU expert sharing were
@@ -48,3 +55,5 @@ tokens on the old server and 108 on the new server, despite a 256-token cap.
 - [Final short report](20261103-211344-fork-final-32768.md)
 - [Replacement installation report](20261103-213349-installed-fork-replacement.json)
 - [Replacement short report](20261103-213349-installed-fork-replacement.md)
+- [Single fork installation report](20261103-214548-single-fork-install-new-vision.json)
+- [Single fork installation short report](20261103-214548-single-fork-install-new-vision.md)
