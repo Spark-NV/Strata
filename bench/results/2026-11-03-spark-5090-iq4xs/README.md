@@ -338,3 +338,55 @@ RAM mode; the hyper-connection down read (about 10 us at 4 tokens against
 a 3.6 us bandwidth floor) needs a thread layout whose sums of squares add
 in a different order; a smaller draft vocabulary would cut the draft head
 (133 of each 322 us draft step) at the cost of never drafting rare tokens.
+
+## The image reader on demand (2026-11-04)
+
+The GPU image reader held 1.7 GB of VRAM from startup. The server could
+already start it with the first picture and stop it when idle, asking the
+engine to shrink the expert cache first (`VRAM <MiB>`), but the engine refused
+in the pinned RAM mode: there RAM holds only the experts VRAM does not, so a
+dropped slot would lose its expert.
+
+What changed in the engine (opt-in, `--vram-elastic-hold-mib N`, needs
+`--vram-elastic` and `STRATA_EXCHANGE_ROTATE=1`):
+
+- The rotated exchange allocation gets N MiB of extra page-locked blocks
+  ("holds", 1,110 here) that are free at start.
+- The RAM copy already keeps the experts of the prompt path's borrowed tail
+  (the last 3,953 slots). A shrink drops slots from the end, so the dropped
+  experts are in RAM already; the slots that newly fall in the borrowed tail
+  get a hold block filled from VRAM before the shrink (838-852 experts, in
+  46-50 ms). A grow puts the dropped experts back and gives the hold blocks
+  back (always the same count, checked over four cycles). The prompt chunk
+  stays 32,768.
+- The shrink now rounds down to a 512 MiB segment, so the VRAM asked for is
+  really free. Rounding up left the reader 170-400 MiB short and the engine
+  warned of under 512 MiB free during image turns.
+
+Answers to two screenshots were right before and after each cycle (the GPU
+name and the tok/s value read off `docs/media/runpagoda.png`). The first
+picture after idle took 2.8-3.3 s end to end, about 1 s of it starting the
+reader.
+
+Decode A/B, fresh server per arm on this PC, alternated (`ab-vel*`,
+`ab-vbase*`; base = the previous installed engine and config with the reader
+loaded at start):
+
+| | Elastic 1 | Elastic 2 | Base 1 | Base 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Expert cache slots at start | 9,096 | 9,085 | 8,425 | 8,428 |
+| Story, 256 tokens (median tok/s) | 192.2 | 196.8 | 193.4 | 201.9 |
+| Code, 256 tokens (median tok/s) | 213.4 | 216.7 | 195.2 | 214.7 |
+| 16 new topics (total tok/s) | 132.1 | 137.6 | 129.9 | 132.1 |
+| Window (median ms) | 13.36 | 12.89 | 14.05 | 13.07 |
+
+Over all four runs' requests the cache hit rate was 91.3% with the reader on
+demand and 90.3% without. The story probe did not move; code and new topics
+gained about 3-4%. The installed service then gave
+[`20261104-082024-vision-elastic-5090-iq4xs`](20261104-082024-vision-elastic-5090-iq4xs.md):
+decode 189.1, vision prompt 384.9 (check passes), prompts 1,037 / 4,770 /
+7,178 tok/s at 1K / 8K / 32K.
+
+Cost: 2.75 GiB more page-locked RAM for the holds, about 1.7 GiB less for the
+RAM copy (the larger cache holds those experts), and a picture after 120 s
+without one waits about 1 s for the reader plus the shrink.

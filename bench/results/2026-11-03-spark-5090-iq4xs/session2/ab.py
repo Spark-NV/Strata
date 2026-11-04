@@ -2,7 +2,7 @@
 import json, os, re, subprocess, sys, time, urllib.request, statistics as S
 ROOT="/home/spark/Apps/Strata"; SP=os.path.dirname(os.path.abspath(__file__))
 name=sys.argv[1]; kv=dict(a.split("=",1) for a in sys.argv[2:])
-c=json.load(open(f"{ROOT}/personal/rtx5090-orca-iq4xs.json"))
+c=json.load(open(kv.pop("cfg",f"{ROOT}/personal/rtx5090-orca-iq4xs.json")))   # cfg=: another config (the A/B's baseline)
 c["port"]=8090; log=f"{SP}/ab-{name}.log"; c["log"]=log
 c.pop("expert_profile_save",None); c.pop("expert_profile_save_every",None)
 if "exe" in kv: c["exe"]=kv.pop("exe")

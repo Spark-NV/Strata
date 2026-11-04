@@ -24,8 +24,9 @@ installation.
 
 `rtx5090-orca-iq4xs.json` keeps the old model files, 260,000-token context,
 INT8 KV, 32,768 resident KV cells, 64 GiB expert RAM budget, sampling defaults
-and 4-token MTP draft setting. It uses a 32,768-token prompt chunk, keeps the
-image reader on the GPU from startup, and disables route tail skipping and
+and 4-token MTP draft setting. It uses a 32,768-token prompt chunk, starts the GPU
+image reader with the first picture and stops it after 120 s without one,
+and disables route tail skipping and
 short-prompt CPU expert sharing. Both disabled defaults can change answers;
 they were absent from the old 0.1.39 engine. The learned expert profile is
 reused and saved across restarts.
@@ -54,3 +55,12 @@ chosen by fixed-length probes on this PC: shorter draft runs, and adaptive
 swaps that hand pinned buffers over instead of copying each evicted expert
 through RAM, so the cache can follow a new topic quickly without slowing the
 CPU expert pool.
+
+The image reader is on demand (`"elastic": true` in the vision section,
+`"vram_elastic": true`, `--vram-elastic-hold-mib 2816`). Without a picture its
+1.7 GB of VRAM holds about 640 more experts (9,100 slots instead of 8,460). A
+picture shrinks the expert cache by 2,600 MiB first (about 840 slots, 50 ms),
+then the reader starts in about 1 s; 120 s after the last picture it stops and
+the cache grows back. The experts the shrink takes out of VRAM keep a copy in
+2.75 GiB of page-locked RAM set aside at start (`--vram-elastic-hold-mib`), so
+nothing is read from the SSD. This needs `STRATA_EXCHANGE_ROTATE=1`.
