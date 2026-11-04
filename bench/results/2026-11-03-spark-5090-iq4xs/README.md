@@ -252,3 +252,38 @@ rows of 2,560 floats, the GPU's rows given as hits):
 | 4 | 3 | 5.14 | 3.48 |
 | 8 | 3 | 5.71 | 3.88 |
 | 8 | 8 | 5.81 | 5.42 |
+
+## Exchange buffer rotation (2026-11-04)
+
+An exchange of the adaptive tier copied the expert leaving VRAM into a
+staging buffer and then, with a CPU `memcpy`, into the RAM place of the
+expert coming in: about 10.6 MB of RAM traffic per swap. With the pinned,
+mapped RAM copy of this config, `STRATA_EXCHANGE_ROTATE=1` hands buffer
+ownership over instead (0.24 GiB of spare page-locked buffers, no host
+copy; the upstream A/B found the same output tokens). Swaps became cheap
+enough that adapting more often pays:
+
+| Rotation, `--adapt-every` | Story | Code | 16 topics |
+| --- | ---: | ---: | ---: |
+| 8 | 177.0 | 184.9 | 107.2 |
+| 4 | 174.3 | 184.8 | 117.5 |
+| 2 | 185.3, 186.4 | 192.7, 188.2 | 120.0, 128.6 |
+| 1 | 176.3 | 195.8 | 128.7 |
+| 2, `--adapt-swaps 192` | 184.8 | 188.2 | 129.7 |
+| 2, `--adapt-min-gain 1.2` | 186.6 | 197.4 | 123.7 |
+
+The config now sets rotation and `--adapt-every 2`. Against the settings at
+the start of the day (no rotation, every 4 windows, min-p 0.5: 174 / 177 /
+110) that is about +6% story, +8% code and +13% on new topics. Two more
+rounds checked the draft cut-off under rotation: min-p 0.7 gave 183.9 /
+191.6 / 122.6 and 184.1 / 199.5 / 126.2, min-p 0.5 gave 183.0 / 183.0 /
+120.3 and 178.1 / 187.8 / 121.3. The benchmark's word-list prompt answers
+with 6 to 106 tokens, so its decode rate varies with the answer length;
+it was 144-150 tok/s with either cut-off.
+
+The installed service then gave 169.4 decode tok/s on the benchmark's
+word-list case (121 tokens), 1,064.5 at 1K, 4,895.0 at 8K, 7,233.1 at 32K,
+361.9 vision prompt tok/s and 126.7 tok/s on the 16 topics. All vision
+answers were `red` and all prompt answers `BENCHMARK-ACK`.
+
+- [Installed report](20261104-010950-rotate-adapt2-5090-iq4xs.json)

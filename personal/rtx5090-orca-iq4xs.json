@@ -18,7 +18,7 @@
     "--kv-resident", "32768",
     "--vision",
     "--vram-reserve-mib", "1024",
-    "--adapt-every", "8"
+    "--adapt-every", "2"
   ],
   "cwd": "/home/spark/Apps/Strata",
   "tokenizer": "/home/spark/Apps/Strata/packs/orca-iq4_xs/tokenizer",
@@ -45,6 +45,7 @@
     "STRATA_ROUTE_TAIL_SKIP": "0",
     "STRATA_PREFILL_CPU_SHARE": "0",
     "STRATA_ADAPT_OVERLAP": "1",
-    "STRATA_ADAPT_OVERLAP_RESIDENT": "1"
+    "STRATA_ADAPT_OVERLAP_RESIDENT": "1",
+    "STRATA_EXCHANGE_ROTATE": "1"
   }
 }

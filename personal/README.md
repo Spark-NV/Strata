@@ -49,6 +49,8 @@ and it slowed decode windows from 15.8 to 17.5 ms. On Linux the mapped PLE
 table is advised `MADV_RANDOM` and the drafted tokens' rows are read ahead.
 Both changes are measured in the results README below.
 
-`--spec-min-p 0.7` and `--adapt-every 8` were chosen by fixed-length probes
-on this PC: shorter draft runs and half as many adaptive swaps (each swap
-copies an expert both ways through RAM, which slows the CPU expert pool).
+`--spec-min-p 0.7`, `--adapt-every 2` and `STRATA_EXCHANGE_ROTATE=1` were
+chosen by fixed-length probes on this PC: shorter draft runs, and adaptive
+swaps that hand pinned buffers over instead of copying each evicted expert
+through RAM, so the cache can follow a new topic quickly without slowing the
+CPU expert pool.

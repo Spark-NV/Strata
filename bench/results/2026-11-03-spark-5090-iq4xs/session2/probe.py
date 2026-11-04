@@ -25,7 +25,9 @@ ap.add_argument("--prefill", action="store_true")
 a = ap.parse_args()
 model = sb.get_json(a.base + "/health").get("model") or ""
 res = {}
-for tag, p in (("story", STORY), ("code", CODE)):
+WORDS = ("Return a sequence of simple lowercase English words separated by single spaces. "
+         "Keep writing until the output limit. Do not explain the task, use headings, or stop early.")
+for tag, p in (("story", STORY), ("code", CODE), ("words", WORDS)):
     rows = run(a.base, model, p, a.n, tag)
     d = [r["decode_tok_s"] for r in rows[a.skip:]]
     acc = sum(r["drafts_accepted"] or 0 for r in rows) / max(1, sum(r["drafts_offered"] or 0 for r in rows))
