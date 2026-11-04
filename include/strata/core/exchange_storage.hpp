@@ -20,6 +20,10 @@ namespace strata::core::detail {
 // size per expert (a pack whose layers differ, as the GGUF's mixed i-quants): the spares are kept per size, and
 // since a swap exchanges two experts of one layer, the buffer a commit hands back has the size of the one it took,
 // so every size keeps its number of spares for good.
+//
+// Holds (`hold` > 0, the resident RAM mode with --vram-elastic): `hold` more blocks of every size, free at start.  The
+// VRAM command takes one for an expert whose VRAM slot it gives up or whose slot the prompt path may now borrow
+// (`hold`), and gives it back when the cache has grown again and the expert's slot keeps it (`release`).
 class ExchangeStorage {
 public:
     struct View {
@@ -61,14 +65,16 @@ public:
 
     /// The exchange allocation `initialize_sized` lays out: `count - bounce` buffers of every distinct size in
     /// `sizes` (zeros skipped), then `bounce` buffers of the largest.  0 when the geometry is empty or overflows.
-    static uint64_t exchange_bytes_needed(const std::vector<uint64_t>& sizes, size_t count, size_t bounce) {
+    /// `hold` more blocks of every size after them (see Holds above).
+    static uint64_t exchange_bytes_needed(const std::vector<uint64_t>& sizes, size_t count, size_t bounce,
+                                          size_t hold = 0) {
         const std::vector<size_t> classes = classes_of(sizes);
         if (classes.empty() || count == 0 || bounce > count) return 0;
         uint64_t sum = 0;
         for (const size_t c : classes) sum += c;
         const uint64_t lim = std::numeric_limits<uint64_t>::max();
-        if (sum > lim / count) return 0;
-        return (uint64_t) (count - bounce) * sum + (uint64_t) bounce * classes.back();
+        if (count > lim - hold || sum > lim / (count + hold)) return 0;
+        return (uint64_t) (count - bounce + hold) * sum + (uint64_t) bounce * classes.back();
     }
 
     /// `sizes[i]`: expert i's block size (its layer's).  Spare ordinals `q < count - bounce` exist in every size;
@@ -76,7 +82,7 @@ public:
     bool initialize_sized(const std::vector<uint64_t>& offsets, const std::vector<uint64_t>& sizes,
                           uint8_t* resident_host, const uint8_t* resident_device, uint64_t resident_bytes,
                           uint8_t* exchange_host, const uint8_t* exchange_device, uint64_t exchange_bytes,
-                          size_t count, size_t bounce, std::string& error) {
+                          size_t count, size_t bounce, std::string& error, size_t hold = 0) {
         error.clear();
         if (active()) { error = "exchange storage already initialized"; return false; }
         if (!resident_host || !resident_device || !exchange_host || !exchange_device || !count || bounce > count ||
@@ -84,7 +90,7 @@ public:
             error = "invalid mapped exchange geometry"; return false;
         }
         const std::vector<size_t> classes = classes_of(sizes);
-        const uint64_t need = exchange_bytes_needed(sizes, count, bounce);
+        const uint64_t need = exchange_bytes_needed(sizes, count, bounce, hold);
         if (classes.empty() || need == 0 || need > exchange_bytes ||
             classes.size() > std::numeric_limits<size_t>::max() / count) {
             error = "the exchange allocation does not hold the spares of every block size"; return false;
@@ -120,7 +126,16 @@ public:
                 buffer_bytes.push_back(classes[c]);
                 at += classes[c];
             }
+        std::vector<std::vector<size_t>> held_free(classes.size());
+        for (size_t c = 0; c < classes.size(); ++c)
+            for (size_t h = 0; h < hold; ++h) {
+                held_free[c].push_back(buffers.size());
+                buffers.push_back({exchange_host + (size_t) at, exchange_device + (size_t) at});
+                buffer_bytes.push_back(classes[c]);
+                at += classes[c];
+            }
         experts_ = std::move(experts);
+        held_free_.swap(held_free);
         expert_count_ = offsets.size();
         expert_bytes_.assign(sizes.begin(), sizes.end());
         spares_.swap(spares);
@@ -169,12 +184,39 @@ public:
         return true;
     }
 
+    /// A free block of `expert`'s size becomes its RAM copy (the caller then fills it); {} when it has one already
+    /// or none is free.  Only between rounds of the cache manager: no reader of `expert` may be in flight.
+    View hold(size_t expert) {
+        if (expert >= expert_count_ || experts_[expert].load(std::memory_order_acquire) != kAbsent) return {};
+        const size_t c = class_of((size_t) expert_bytes_[expert]);
+        if (c == kAbsent || c >= held_free_.size() || held_free_[c].empty()) return {};
+        const size_t id = held_free_[c].back();
+        held_free_[c].pop_back();
+        experts_[expert].store(id, std::memory_order_release);
+        return buffers_[id];
+    }
+    /// `expert`'s RAM copy goes back to the free blocks (its VRAM slot holds it).  Same rule as `hold`.
+    bool release(size_t expert) {
+        if (expert >= expert_count_) return false;
+        const size_t id = experts_[expert].load(std::memory_order_acquire);
+        const size_t c = id != kAbsent ? class_of(buffer_bytes_[id]) : kAbsent;
+        if (c == kAbsent || c >= held_free_.size()) return false;
+        experts_[expert].store(kAbsent, std::memory_order_release);
+        held_free_[c].push_back(id);
+        return true;
+    }
+    /// Free hold blocks of `bytes` (0 when there are no holds of that size).
+    size_t holds_free(size_t bytes) const {
+        const size_t c = class_of(bytes);
+        return c != kAbsent && c < held_free_.size() ? held_free_[c].size() : 0;
+    }
+
     uint64_t exchanges() const { return exchanges_; }
     uint64_t avoided_bytes() const { return avoided_bytes_; } // memcpy payload, not read+write total
     size_t block_sizes() const { return classes_.size(); }
     void clear() {
         experts_.reset(); expert_count_ = 0; expert_bytes_.clear(); buffers_.clear(); buffer_bytes_.clear(); spares_.clear();
-        classes_.clear();
+        classes_.clear(); held_free_.clear();
         count_ = 0; blob_bytes_ = 0; exchanges_ = avoided_bytes_ = 0;
     }
 
@@ -199,6 +241,7 @@ private:
     std::vector<size_t> buffer_bytes_; // each buffer's block size, immutable
     std::vector<size_t> spares_; // [size class * count_ + q]; touched only by the serialized cache manager
     std::vector<size_t> classes_; // the distinct block sizes, ascending
+    std::vector<std::vector<size_t>> held_free_; // [size class]: the free hold blocks; touched only by the cache manager
     size_t count_ = 0;
     size_t blob_bytes_ = 0; // the largest block size; 0 = not initialized
     uint64_t exchanges_ = 0, avoided_bytes_ = 0;

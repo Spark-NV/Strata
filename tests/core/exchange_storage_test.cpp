@@ -218,12 +218,65 @@ void invalid_geometry() {
     require(!s.active(), "failed initialization left active state");
 }
 
+// --vram-elastic-hold-mib: hold blocks of every size after the spares, free at start; hold takes one for an expert without
+// a RAM copy, release gives any expert's block back (also one a swap moved), and exchanges go on beside them
+void exercise_holds() {
+    const size_t layer_bytes[2] = {48, 96};
+    constexpr size_t per_layer = 8, resident_per_layer = 4, n = 2 * per_layer, count = 2, hold = 3;
+    std::vector<uint64_t> sizes(n), offsets(n, absent);
+    uint64_t resident_bytes = 0;
+    for (size_t i = 0; i < n; ++i) {
+        sizes[i] = layer_bytes[i / per_layer];
+        if (i % per_layer < resident_per_layer) { offsets[i] = resident_bytes; resident_bytes += sizes[i]; }
+    }
+    const uint64_t need = ExchangeStorage::exchange_bytes_needed(sizes, count, 0, hold);
+    require(need == (count + hold) * (48 + 96), "wrong allocation size with holds");
+    std::vector<uint8_t> arena(resident_bytes), spare(need), aliases(resident_bytes), spare_aliases(need);
+    ExchangeStorage storage;
+    std::string error;
+    require(!storage.initialize_sized(offsets, sizes, arena.data(), aliases.data(), resident_bytes, spare.data(),
+        spare_aliases.data(), need - 1, count, 0, error, hold), "short hold allocation accepted");
+    require(storage.initialize_sized(offsets, sizes, arena.data(), aliases.data(), resident_bytes, spare.data(),
+        spare_aliases.data(), need, count, 0, error, hold), error.c_str());
+    require(storage.holds_free(48) == hold && storage.holds_free(96) == hold && storage.holds_free(64) == 0,
+            "wrong free holds at start");
+    std::set<uint8_t*> blocks;
+    for (size_t i = 0; i < n; ++i) if (auto p = storage.resident(i).host) blocks.insert(p);
+    for (size_t c = 0; c < 2; ++c) for (size_t q = 0; q < count; ++q) blocks.insert(storage.spare(q, layer_bytes[c]).host);
+    require(!storage.hold(0).host, "a hold for an expert that has a copy");
+    const auto h = storage.hold(per_layer + 5);   // layer 1, not resident
+    require(h.host && h.device && storage.resident(per_layer + 5).host == h.host, "hold not adopted");
+    require(blocks.insert(h.host).second, "hold block aliases a live block");
+    require(h.host >= spare.data() && h.host + 96 <= spare.data() + need, "hold block outside the allocation");
+    require(storage.holds_free(96) == hold - 1 && storage.holds_free(48) == hold, "hold taken from the wrong size");
+    // a swap of layer 1: the held expert goes into VRAM, a non-resident one takes the spare
+    const auto staged = storage.spare(0, 96);
+    require(storage.commit(per_layer + 5, per_layer + 6, 0, staged.host, 96), "swap beside a hold rejected");
+    require(storage.spare(0, 96).host == h.host, "the hold block was not recycled as a spare");
+    // release an original resident block of layer 0: it becomes a free hold of its size
+    const auto r = storage.resident(1);
+    require(storage.release(1) && !storage.resident(1).host && storage.holds_free(48) == hold + 1, "release failed");
+    require(!storage.release(1), "a second release accepted");
+    const auto again = storage.hold(7);
+    require(again.host == r.host && again.device == r.device, "the released block was not handed out again");
+    // layer 1 has hold - 1 free blocks left: they go, then a hold is refused
+    size_t taken = 0;
+    for (size_t i = per_layer; i < n; ++i) if (!storage.resident(i).host && storage.hold(i).host) ++taken;
+    require(taken == hold - 1 && storage.holds_free(96) == 0, "wrong number of holds handed out");
+    size_t without = 0;   // 12, 13 (in VRAM after the swap) and 15 had none: two holds, one left without
+    for (size_t i = per_layer; i < n; ++i) without += storage.resident(i).host == nullptr;
+    require(without == 1 && !storage.hold(n - 1).host, "a hold past the last free block");
+    std::set<uint8_t*> live;
+    for (size_t i = 0; i < n; ++i) if (auto p = storage.resident(i).host) require(live.insert(p).second, "two experts share a block");
+}
+
 int main() {
     try {
         invalid_geometry();
         for (size_t bytes : {1u, 33u, 4097u}) exercise(bytes, 1024);
         exercise(5222400, 4); // actual Q8 expert size
         exercise_sized(2048);
+        exercise_holds();
         std::cout << "exchange_storage_test: PASS (byte/alias/ownership checks, 12304 exchanges; several block sizes)\n";
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

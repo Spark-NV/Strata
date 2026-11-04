@@ -794,6 +794,19 @@ public:
     /// `bounce`: how many of the last buffers are only staged through and never hold an exchange (STRATA_EXCHANGE_ROTATE
     /// keeps those in the largest block size alone).
     bool reserve_exchanges(int64_t n, std::string& err, int64_t bounce = 0);
+    /// --vram-elastic-hold-mib: `blobs` more page-locked blocks of every size in the rotated exchange allocation, so the
+    /// VRAM command can shrink the cache in the resident RAM mode (an expert its slots give up keeps a RAM copy).  Set
+    /// BEFORE `reserve_exchanges`; only with STRATA_EXCHANGE_ROTATE=1 (the blocks are part of its ownership table).
+    void set_resident_hold(int64_t blobs) { hold_blobs_ = blobs > 0 ? blobs : 0; }
+    /// The hold blocks the rotation made (0: none, the VRAM command keeps refusing the resident RAM mode).
+    int64_t resident_holds() const { return exchange_storage_.active() ? hold_blobs_ : 0; }
+    /// Free hold blocks of `layer`'s size.
+    int64_t holds_free(int64_t layer) const;
+    /// A free hold block becomes the RAM copy of (layer, expert) and is returned for the caller to fill; nullptr when it
+    /// has one already or none is free.  Between requests only (no window, swap or prompt read in flight).
+    uint8_t* hold_resident(int64_t layer, int64_t expert);
+    /// (layer, expert)'s RAM copy goes back to the free hold blocks (its VRAM slot keeps it).  Same rule.
+    bool release_resident(int64_t layer, int64_t expert);
     int64_t exchange_capacity() const { return xstage_cap_; }
     /// The exchange buffers are page-locked (cudaHostAlloc): copies to and from them are asynchronous.
     bool exchange_pinned() const { return xstage_pinned_; }
@@ -1211,6 +1224,7 @@ private:
     bool complement_whole_ = false;
     std::vector<uint64_t> complement_offsets_;
     detail::ExchangeStorage exchange_storage_; // authoritative when active; original arenas still own memory
+    int64_t hold_blobs_ = 0;                   ///< set_resident_hold: hold blocks of every size
     bool complement_pinned_ = false;
     bool complement_partial_ = false;         ///< CS-T: only the first complement_pin_limit_ bytes are registered
     bool complement_registered_ = false;      ///< the arena is ordinary memory registered with cudaHostRegister (not cudaHostAlloc)

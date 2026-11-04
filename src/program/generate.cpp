@@ -795,6 +795,9 @@ struct Options {
     /// `VRAM <reserve_mib>` command can give part of it back to other programs and take it again.  Off: one cudaMalloc.
     bool vram_elastic = false;
     int64_t vram_segment_mib = 512;
+    /// `--vram-elastic-hold-mib N`: page-locked RAM for the experts a shrink takes out of VRAM in the resident RAM mode
+    /// (0, the default: the VRAM command refuses that mode).  Needs STRATA_EXCHANGE_ROTATE=1 and the adaptive tier.
+    int64_t vram_elastic_hold_mib = 0;
     /// `--vram-reserve-later-mib N`: the reserve on a layer split's later cards (default: the same as the first).
     /// A card that drives no display needs less than the one the monitors are on.
     int vram_reserve_later_mib = -1;
@@ -1112,6 +1115,9 @@ void usage() {
                  "  --vram-elastic       --serve (#533, opt-in, NVIDIA): the expert cache in segments (--vram-segment-mib,\n"
                  "                       default 512), so the command `VRAM <reserve_mib>` (the server's POST /v1/vram) can\n"
                  "                       give VRAM back to other programs between requests and take it back later\n"
+                 "  --vram-elastic-hold-mib N  --vram-elastic in the resident RAM mode (opt-in, STRATA_EXCHANGE_ROTATE=1):\n"
+                 "                       N MiB of page-locked RAM for the experts a shrink takes out of VRAM, so the\n"
+                 "                       command works there too (an image encoder that starts on demand, say)\n"
                  "  --batch N / --slots N  --serve (opt-in): up to N requests decode together in batch slots (2..8\n"
                  "                       normally; --batch-mtp waves more through eight-row windows),\n"
                  "                       each slot with its own session (VRAM like the main one); docs/BATCHING.md\n"
@@ -3480,6 +3486,7 @@ int main(int argc, char** argv) {
         else if (a == "--no-prefill-borrow") o.no_prefill_borrow = true;
         else if (a == "--vram-elastic") o.vram_elastic = true;
         else if (a == "--vram-segment-mib") o.vram_segment_mib = std::atoll(next("--vram-segment-mib"));
+        else if (a == "--vram-elastic-hold-mib") o.vram_elastic_hold_mib = std::atoll(next("--vram-elastic-hold-mib"));
         else if (a == "--prefill-until") o.prefill_until = std::atoll(next("--prefill-until"));
         else if (a == "--dump-final-r") o.dump_final_r = next("--dump-final-r");
         else if (a == "--spec") o.spec = std::atoi(next("--spec"));
@@ -9957,6 +9964,13 @@ int main(int argc, char** argv) {
                          o.resident_budget > 0 ? "A larger --resident-budget-gib (the lend region comes after the ranked experts), or a smaller --prefill,"
                                                : "A smaller --prefill, or auto,");
         if (resident_ok) {
+            // --vram-elastic-hold-mib: hold blocks beside the exchange buffers (the rotation's allocation)
+            if (o.vram_elastic && xcache.segmented() && o.vram_elastic_hold_mib > 0) {
+                int64_t blob = 0;
+                for (int64_t l = 0; l < g.n_layers; ++l)
+                    blob = std::max<int64_t>(blob, (int64_t) strata::kernels::cpu::expert_layout().blob_bytes(l));
+                if (blob > 0) src.set_resident_hold(((o.vram_elastic_hold_mib << 20) + blob - 1) / blob);
+            }
             // --adapt-async: twice the exchange buffers - the second half bounces the copies in whose source is not
             // page-locked (an asynchronous copy instead of the driver's staged, synchronous one)
             if (o.adapt_async && !src.reserve_exchanges(2 * std::min<int64_t>(o.adapt_swaps, 96), err,
@@ -9971,6 +9985,12 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "strata generate: CPU expert residency: %s\n", err.c_str());
                 return 1;
             }
+            if (o.vram_elastic_hold_mib > 0 && src.resident_holds() == 0)
+                std::fprintf(stderr, "strata generate: --vram-elastic-hold-mib is off: it needs --vram-elastic, the adaptive "
+                                     "tier and STRATA_EXCHANGE_ROTATE=1 (the VRAM command refuses the resident RAM mode)\n");
+            else if (src.resident_holds() > 0)
+                std::fprintf(stderr, "strata generate: --vram-elastic-hold-mib: %lld blocks of page-locked RAM for the "
+                                     "experts the VRAM command takes out of the cache\n", (long long) src.resident_holds());
             std::fprintf(stderr, "strata generate: resident RAM mode: %.2f GiB of experts in RAM (%s), %lld in the GPU "
                                  "cache; adaptive swaps %s\n",
                          (double) src.resident_bytes() / 1073741824.0,
@@ -13478,6 +13498,47 @@ int main(int argc, char** argv) {
             p.first = (int32_t) std::max<int64_t>(0, live - part_slots(p, c));
             p.first_now = -1;   // laid out again at the next loan
         };
+        // --vram-elastic-hold-mib (the resident RAM mode): the RAM copy holds every expert outside VRAM and the experts of
+        // the slots from `tail` on (the prompt path's loan), and no other.  `tail` moves with a shrink or a grow, so the
+        // experts of slots [tail, ...) without a copy get a hold block filled from their slot (before a shrink drops
+        // the slot), and the experts below `tail` that have one give it back.  Between requests only.
+        const bool vram_holds = src.resident_holds() > 0 && src.complement_whole();
+        auto hold_tail = [&](int64_t tail, std::vector<int32_t>& held, std::string& e) -> bool {
+            for (size_t i = 0; i < host_res.size(); ++i) {
+                const int32_t slot = host_res[i];
+                const int64_t layer = (int64_t) i / g.n_expert, ex = (int64_t) i % g.n_expert;
+                if (slot < tail || src.has_resident(layer, ex)) continue;
+                uint8_t* h = src.hold_resident(layer, ex);
+                if (h == nullptr) {
+                    e = "VRAM: the hold RAM for experts is used up (" + std::to_string(held.size()) +
+                        " blocks taken by this shrink): a larger hold size, or a smaller shrink";
+                    return false;
+                }
+                held.push_back((int32_t) i);
+                if (cudaMemcpyAsync(h, xcache.device_slot(slot),
+                                    (size_t) strata::kernels::cpu::expert_layout().blob_bytes(layer),
+                                    cudaMemcpyDeviceToHost, 0) != cudaSuccess) {
+                    e = std::string("VRAM: copying an expert to RAM failed: ") + cudaGetErrorString(cudaGetLastError());
+                    return false;
+                }
+            }
+            if (cudaStreamSynchronize(0) != cudaSuccess) {
+                e = std::string("VRAM: copying the experts to RAM failed: ") + cudaGetErrorString(cudaGetLastError());
+                return false;
+            }
+            return true;
+        };
+        auto release_below = [&](int64_t tail) -> int64_t {
+            int64_t n = 0;
+            for (size_t i = 0; i < host_res.size(); ++i)
+                if (host_res[i] >= 0 && host_res[i] < tail &&
+                    src.release_resident((int64_t) i / g.n_expert, (int64_t) i % g.n_expert)) ++n;
+            return n;
+        };
+        auto loan_tail = [&](int64_t live, int64_t chunk) -> int64_t {   // where a loan of `chunk` tokens starts
+            if (pf_parts.empty() || pf_parts[0].first < 0) return live;
+            return std::max<int64_t>(0, live - part_slots(pf_parts[0], chunk));
+        };
         auto vram_command = [&](const std::string& cmd, std::string& e) -> bool {
             // `VRAM` alone: the reserve the engine started with (--vram-reserve-mib)
             char* end = nullptr;
@@ -13488,8 +13549,9 @@ int main(int argc, char** argv) {
                 e = "VRAM needs an engine started with --vram-elastic (one NVIDIA GPU, --serve)";
                 return false;
             }
-            if (src.complement_ready()) {
-                e = "VRAM: not with the resident low-RAM mode (the cache holds experts RAM does not)";
+            if (src.complement_ready() && !vram_holds) {
+                e = "VRAM: not with the resident low-RAM mode (the cache holds experts RAM does not; "
+                    "a hold size in MiB with STRATA_EXCHANGE_ROTATE=1 lets it)";
                 return false;
             }
             if (peer.valid()) { e = "VRAM: not with --peer-device"; return false; }
@@ -13513,9 +13575,24 @@ int main(int argc, char** argv) {
             if ((int64_t) free_b < want_free) {
                 const int64_t floor_b = xcache.bytes_of(floor_slots);
                 int64_t keep = mapped - (want_free - (int64_t) free_b);
+                // shrink() keeps whole segments, rounding UP: down to a segment boundary here, so the reserve asked for
+                // is really free (rounding up left up to a segment less, and an image encoder short of its room)
+                if (const int64_t seg = xcache.segment_bytes(); seg > 0 && keep > 0) keep = keep / seg * seg;
                 if (keep < floor_b) {
                     keep = floor_b;
                     note = " (the cache keeps its smallest size: the prompt path's buffers)";
+                }
+                if (vram_holds) {
+                    // the slots the shrink keeps at least, and the loan's start there (the full chunk: relend keeps it
+                    // while it fits, and a smaller one starts later): every expert from there on needs a RAM copy
+                    std::vector<int32_t> held;
+                    std::string he;
+                    if (!hold_tail(loan_tail(xcache.slots_within(keep), chunk_full), held, he)) {
+                        for (const int32_t i : held) src.release_resident(i / g.n_expert, i % g.n_expert);
+                        e = he;
+                        return false;
+                    }
+                    if (!held.empty()) note += " (" + std::to_string(held.size()) + " experts copied to RAM)";
                 }
                 if (!xcache.shrink(keep, e)) return false;
                 const int64_t live = xcache.slots();
@@ -13560,6 +13637,16 @@ int main(int argc, char** argv) {
                 res_upload();
             }
             relend();
+            if (vram_holds) {
+                // the loan as relend laid it: copies for its slots that have none (none after a shrink's own pass), and
+                // the experts below it give theirs back
+                std::vector<int32_t> held;
+                std::string he;
+                const int64_t tail = loan_tail(xcache.slots(), o.prefill_chunk);
+                if (!hold_tail(tail, held, he)) std::fprintf(stderr, "strata serve: %s\n", he.c_str());
+                const int64_t back = release_below(tail);
+                if (back > 0) note += " (" + std::to_string(back) + " RAM copies given back)";
+            }
             cudaMemGetInfo(&free_b, &total_b);
             std::fprintf(stderr, "strata serve: VRAM %lld MiB kept free: the expert cache %lld -> %lld of %lld slots "
                                  "(%.2f of %.2f GiB), %lld MiB free now, prompt chunk %lld, in %.0f ms%s\n",

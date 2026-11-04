@@ -4263,7 +4263,8 @@ bool FileExpertSource::reserve_exchanges(int64_t n, std::string& err, int64_t bo
     const bool requested = rotate_env && std::strcmp(rotate_env, "1") == 0;
     // layers of several block sizes (a GGUF's mixed i-quants): spares of every size, see ExchangeStorage
     bounce = std::max<int64_t>(0, std::min(bounce, n));
-    const uint64_t rotate_total = detail::ExchangeStorage::exchange_bytes_needed(layer_blob_bytes_, (size_t) n, (size_t) bounce);
+    const uint64_t rotate_total = detail::ExchangeStorage::exchange_bytes_needed(layer_blob_bytes_, (size_t) n, (size_t) bounce,
+                                                                                 (size_t) hold_blobs_);
     const bool eligible = requested && rotate_total != 0 && rotate_total <= std::numeric_limits<size_t>::max() &&
                           complement_pinned_ && !complement_partial_ &&
                           complement_host_ && complement_device_ && complement_bytes_ > 0;
@@ -4291,11 +4292,14 @@ bool FileExpertSource::reserve_exchanges(int64_t n, std::string& err, int64_t bo
                     sizes[i] = layer < layer_blob_bytes_.size() ? layer_blob_bytes_[layer] : 0;
                 }
                 if (exchange_storage_.initialize_sized(complement_offsets_, sizes, (uint8_t*)complement_host_, complement_device_,
-                        complement_bytes_, xstage_, (const uint8_t*)device, (uint64_t)total, (size_t)n, (size_t)bounce, reason)) {
+                        complement_bytes_, xstage_, (const uint8_t*)device, (uint64_t)total, (size_t)n, (size_t)bounce, reason,
+                        (size_t) hold_blobs_)) {
                     std::fprintf(stderr, "FileExpertSource: exchange buffer rotation enabled: %lld buffers in %zu block sizes "
-                                         "(largest %llu bytes, %.2f GiB page-locked); no host commit memcpy\n",
+                                         "(largest %llu bytes, %.2f GiB page-locked); no host commit memcpy%s\n",
                                  (long long)n, exchange_storage_.block_sizes(), (unsigned long long)blob,
-                                 (double)total / 1073741824.0);
+                                 (double)total / 1073741824.0,
+                                 hold_blobs_ > 0 ? ("; " + std::to_string(hold_blobs_) + " hold blocks of every size for "
+                                                    "--vram-elastic").c_str() : "");
                 }
             } catch (const std::bad_alloc&) { reason = "buffer metadata allocation failed"; }
         } else if (eligible) {
@@ -4306,6 +4310,27 @@ bool FileExpertSource::reserve_exchanges(int64_t n, std::string& err, int64_t bo
             std::fprintf(stderr, "FileExpertSource: exchange rotation unavailable; retaining copy path: %s\n", reason.c_str());
     }
     return true;
+}
+
+int64_t FileExpertSource::holds_free(int64_t layer) const {
+    if (!exchange_storage_.active() || layer < 0 || layer >= n_layers_) return 0;
+    return (int64_t) exchange_storage_.holds_free((size_t) layer_blob_bytes_[(size_t) layer]);
+}
+
+uint8_t* FileExpertSource::hold_resident(int64_t layer, int64_t expert) {
+    if (!complement_ready_ || !exchange_storage_.active() || !staged_.empty() || layer < 0 || expert < 0 ||
+        layer >= n_layers_ || expert >= n_expert_) return nullptr;
+    const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
+    if (!override_.empty() && override_[index] != nullptr) return nullptr;
+    return exchange_storage_.hold(index).host;
+}
+
+bool FileExpertSource::release_resident(int64_t layer, int64_t expert) {
+    if (!complement_ready_ || !exchange_storage_.active() || !staged_.empty() || layer < 0 || expert < 0 ||
+        layer >= n_layers_ || expert >= n_expert_) return false;
+    const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
+    if (!override_.empty() && override_[index] != nullptr) return false;
+    return exchange_storage_.release(index);
 }
 
 uint8_t* FileExpertSource::exchange_buffer(int64_t q, int64_t layer) const {
