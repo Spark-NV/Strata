@@ -13512,6 +13512,7 @@ int main(int argc, char** argv) {
                 if (h == nullptr) {
                     e = "VRAM: the hold RAM for experts is used up (" + std::to_string(held.size()) +
                         " blocks taken by this shrink): a larger hold size, or a smaller shrink";
+                    cudaStreamSynchronize(0);   // the copies queued so far land before a caller gives their blocks back
                     return false;
                 }
                 held.push_back((int32_t) i);
@@ -13519,6 +13520,7 @@ int main(int argc, char** argv) {
                                     (size_t) strata::kernels::cpu::expert_layout().blob_bytes(layer),
                                     cudaMemcpyDeviceToHost, 0) != cudaSuccess) {
                     e = std::string("VRAM: copying an expert to RAM failed: ") + cudaGetErrorString(cudaGetLastError());
+                    cudaStreamSynchronize(0);
                     return false;
                 }
             }
@@ -13571,7 +13573,7 @@ int main(int argc, char** argv) {
             // what stays at least: the prompt path's smallest loan (256 tokens) and the 128 slots it must leave
             const int64_t floor_slots = std::min<int64_t>(xcache.full_slots(),
                 g_lend_keep + (pf_parts.empty() || pf_parts[0].first < 0 ? 0 : part_slots(pf_parts[0], 256)));
-            std::string note;
+            std::string note, shrink_err;
             if ((int64_t) free_b < want_free) {
                 const int64_t floor_b = xcache.bytes_of(floor_slots);
                 int64_t keep = mapped - (want_free - (int64_t) free_b);
@@ -13594,7 +13596,9 @@ int main(int argc, char** argv) {
                     }
                     if (!held.empty()) note += " (" + std::to_string(held.size()) + " experts copied to RAM)";
                 }
-                if (!xcache.shrink(keep, e)) return false;
+                // a shrink that fails can stop part way, with segments already gone: the slots past the live end are
+                // dropped below either way, and the hold pass after relend gives back the copies not needed
+                if (!xcache.shrink(keep, shrink_err)) note += " (the shrink stopped: " + shrink_err + ")";
                 const int64_t live = xcache.slots();
                 for (size_t i = 0; i < host_res.size(); ++i)
                     if (host_res[i] >= live) {
@@ -13654,6 +13658,7 @@ int main(int argc, char** argv) {
                          (double) xcache.mapped_bytes() / 1073741824.0, (double) xcache.full_bytes() / 1073741824.0,
                          (long long) (free_b >> 20), (long long) o.prefill_chunk,
                          std::chrono::duration<double, std::milli>(Clock::now() - t0).count(), note.c_str());
+            if (!shrink_err.empty()) { e = "VRAM: " + shrink_err; return false; }   // the reply is the ERR line
             std::printf("VRAM reserve_mib=%lld expert_slots=%lld expert_slots_full=%lld expert_cache_mib=%lld "
                         "expert_cache_full_mib=%lld vram_free_mib=%lld prompt_chunk=%lld\n", reserve,
                         (long long) xcache.slots(), (long long) xcache.full_slots(),
