@@ -305,7 +305,7 @@ namespace {
 // iq_avx2.cpp is compiled for AVX2 (an AVX-only CPU, or STRATA_FORCE_ISA=avx, keeps ggml's).  STRATA_NO_Q8K_AVX2=1:
 // ggml's on any CPU.
 bool q8k_avx512(int type) {
-    static const bool on = cpu_avx512_ok() && std::getenv("STRATA_NO_Q8K_AVX512") == nullptr &&
+    static const bool on = cpu_avx512_experts() && std::getenv("STRATA_NO_Q8K_AVX512") == nullptr &&
                            std::getenv("STRATA_NO_Q8K_AVX2") == nullptr;
     return on && type == (int) GGML_TYPE_Q8_K;
 }
@@ -504,12 +504,33 @@ void native_gu_rows_impl(const NativeFmt& f, const uint8_t* blob, const void* co
         const char* e = std::getenv("STRATA_AVX512_1T");
         return e != nullptr && e[0] != '\0' ? std::atoi(e) != 0 : cpu_gather_fast();
     }();
+    // STRATA_AVX512_EXPERTS (cpu_avx512_experts) picks the AVX-512 paths of upstream #5243 (this tier, the K-quant
+    // rows, IQ4_XS from two tokens, the 512-bit down rows and quantizer); without it each runs what it ran before.
+    static const bool x512new = avx512 && cpu_avx512_experts();
     static const bool x512_one = avx512 && std::getenv("STRATA_NO_IQ512X1") == nullptr;
     const bool x512_1t_type = f.gu_type == 16 || f.gu_type == 17 || f.gu_type == 18 ||
                               (fast512_1t && (f.gu_type == 21 || f.gu_type == 22));
-    if (x512_one && nt == 1 && nt < native_gu_mt_min(f.gu_type) && f.tail_off == 0 &&
+    if (x512new && x512_one && nt == 1 && nt < native_gu_mt_min(f.gu_type) && f.tail_off == 0 &&
         x512_1t_type && iq512_reference_ok(f.gu_type)) {
         iq512_gu_rows(f.gu_type, blob, f.gu_row, f.up_off, (int) f.n_embd, act, 1, ff, r0, r1);
+        return;
+    }
+    // 0.2.5 (AVX-512 CPUs where a gather is cheap: Intel Sapphire Rapids and later): ONE token of an IQ3_XXS / IQ3_S expert on the
+    // 512-bit exact rows, ggml-cpu's single-token AVX2 dot bit for bit with the grid words gathered: 1.3x ggml's dot on a Xeon 8468
+    // (x512_bench), the same output.  STRATA_NO_IQ512X1=1 turns this off; the first use checks the bits against this ggml.
+    static const bool x512_one_old = !x512new && x512_one && iq512_gather_on();
+    if (x512_one_old && nt == 1 && nt < native_gu_mt_min(f.gu_type) && f.tail_off == 0 &&
+        (f.gu_type == 18 || f.gu_type == 21) && x512_one_ok(f.gu_type)) {
+        const int n1 = (int) f.n_embd;
+        float g[64], u[64];
+        float* gp[1] = {g};
+        float* up[1] = {u};
+        for (int c0 = r0; c0 < r1; c0 += 64) {
+            const int c1 = std::min(r1, c0 + 64);
+            iq512x_rows(f.gu_type, blob + (size_t) c0 * f.gu_row, f.gu_row, n1, act, 1, gp, 0, c1 - c0);
+            iq512x_rows(f.gu_type, blob + f.up_off + (size_t) c0 * f.gu_row, f.gu_row, n1, act, 1, up, 0, c1 - c0);
+            for (int r = c0; r < c1; ++r) ff[0][r] = (g[r - c0] / (1.f + std::exp(-g[r - c0]))) * u[r - c0];
+        }
         return;
     }
     if (arm_dp && nt == 1 && nt < native_gu_mt_min(f.gu_type) && f.tail_off == 0 && iq256_supported(f.gu_type)) {
@@ -519,7 +540,7 @@ void native_gu_rows_impl(const NativeFmt& f, const uint8_t* blob, const void* co
     const int mt_min = native_gu_mt_min(f.gu_type);   // #152
     const bool singleton_iq = Arithmetic == NativeArithmetic::WindowInvariant && mt_min > 1 && !arm_dp;
     // AVX-512 VNNI K-quant rows (Q4_K, Q5_K, Q6_K, Q5_0, Q8_0): bit-exact against ggml-cpu's AVX2 vec_dot for 1..N tokens.
-    static const bool kq512 = avx512 && std::getenv("STRATA_NO_KQ512") == nullptr;
+    static const bool kq512 = x512new && std::getenv("STRATA_NO_KQ512") == nullptr;
     if (kq512 && (nt >= 2 || (fast512_1t && f.gu_type == 13)) && f.tail_off == 0 &&
         kq512_gu_supported(f.gu_type) && kq512_reference_ok(f.gu_type)) {
         kq512_gu_rows(f.gu_type, blob, f.gu_row, f.up_off, (int) f.n_embd, act, nt, ff, r0, r1);
@@ -550,18 +571,19 @@ void native_gu_rows_impl(const NativeFmt& f, const uint8_t* blob, const void* co
     // it, as before (its rows would round differently).  Each kernel only for the formats it implements: falling
     // through an empty switch would leave ff unwritten instead of falling back to ggml-cpu.
     static const bool cpu512 = cpu_avx512_ok();
-    if (nt >= mt_min && (iq512_supported(f.gu_type) || (!cpu512 && iq256_supported(f.gu_type)))) {
+    const bool on512 = iq512_supported(f.gu_type) && (f.gu_type != 23 || x512new);
+    if (nt >= mt_min && (on512 || (!cpu512 && iq256_supported(f.gu_type)))) {
         if (singleton_iq) {
 #if defined(__x86_64__) || defined(_M_X64)
             if (avx512 && ggml_cpu_has_avx2() && ggml_cpu_has_fma() &&
-                iq512_supported(f.gu_type) && iq512_reference_ok(f.gu_type)) {
+                (x512new ? on512 : f.gu_type == 18 || f.gu_type == 21 || f.gu_type == 22) && iq512_reference_ok(f.gu_type)) {
                 iq512_reference_gu_rows(f.gu_type, blob, f.gu_row, f.up_off, (int) f.n_embd, act, nt, ff, r0, r1);
                 return;
             }
 #endif
             // Otherwise use the singleton dot below, keeping its row-major weight reuse across tokens.
         } else {
-            if (avx512 && iq512_supported(f.gu_type)) {
+            if (avx512 && on512) {
                 iq512_gu_rows(f.gu_type, blob, f.gu_row, f.up_off, (int) f.n_embd, act, nt, ff, r0, r1);
                 return;
             }
@@ -635,16 +657,24 @@ void native_down_rows_impl(const NativeFmt& f, const uint8_t* blob, const void* 
         const char* e = std::getenv("STRATA_AVX512_1T");
         return e != nullptr && e[0] != '\0' ? std::atoi(e) != 0 : cpu_gather_fast();
     }();
-    static const bool kq512 = avx512 && std::getenv("STRATA_NO_KQ512") == nullptr;
+    static const bool x512new = avx512 && cpu_avx512_experts();   // see native_gu_rows
+    static const bool kq512 = x512new && std::getenv("STRATA_NO_KQ512") == nullptr;
     if (kq512 && nt >= 2 && f.tail_off == 0 && (f.d_type == 6 || f.d_type == 7 || f.d_type == 8) && kq512_reference_ok(f.d_type)) {
         kq512_rows(f.d_type, blob + f.down_off, f.d_row, (int) f.n_ff, hq, nt, out, r0, r1);
         return;
     }
-    if (avx512 && nt >= mt_min && f.tail_off == 0 && f.d_type == 20 && iq4nl_mt && iq4nl512_reference_ok()) {
+    // Only where 512-bit lanes run at full width (cpu_gather_fast: Zen 5, Sapphire Rapids and later): on a Ryzen 7 7800X3D
+    // (Zen 4, double-pumped) the AVX-2 kernel below is faster, 97.7 vs 107.3 us an expert at two tokens, 163.6 vs 174.4 at
+    // four (iq4xs512_bench, the RTX 5090 IQ4_XS profile's experts).  STRATA_IQ4NL512=1 / 0 forces it.
+    static const bool iq4nl512 = [] {
+        const char* e = std::getenv("STRATA_IQ4NL512");
+        return e != nullptr && e[0] != '\0' ? std::atoi(e) != 0 : cpu_gather_fast();
+    }();
+    if (x512new && iq4nl512 && nt >= mt_min && f.tail_off == 0 && f.d_type == 20 && iq4nl_mt && iq4nl512_reference_ok()) {
         iq4nl512_down_rows(blob + f.down_off, f.d_row, (int) f.n_ff, hq, nt, out, r0, r1);
         return;
     }
-    if (avx512 && (fast512_1t || nt >= mt_min) && f.tail_off == 0 && f.d_type == 42 && cpu_avx2_ok()) {
+    if (x512new && (fast512_1t || nt >= mt_min) && f.tail_off == 0 && f.d_type == 42 && cpu_avx2_ok()) {
         q2_512_down_rows(blob + f.down_off, f.d_row, (int) f.n_ff, hq, nt, out, r0, r1);
         return;
     }

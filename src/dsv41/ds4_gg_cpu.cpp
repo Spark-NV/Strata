@@ -74,11 +74,12 @@ bool gg_cpu_fmt(int tg, int td, int n_embd, int n_ff, IqCpu& f, std::string& err
 void gg_cpu_quant(int act, const float* x, int k, void* dst) {
     init_once();
     if (dbg()) std::fprintf(stderr, "gg_cpu_quant act %d k %d\n", act, k);
-    if (act == (int) GGML_TYPE_Q8_K && strata::kernels::cpu::cpu_avx512_ok()) {
+    if (act == (int) GGML_TYPE_Q8_K && strata::kernels::cpu::cpu_avx512_experts()) {
         strata::kernels::cpu::q8k_quant_avx512(x, dst, k);
         return;
     }
-    if (act == (int) GGML_TYPE_Q8_K && (strata::kernels::cpu::cpu_avx2_ok() || strata::kernels::cpu::cpu_arm_neon_ok())) {
+    // (x86 without STRATA_AVX512_EXPERTS: ggml's quantizer, as before upstream #5243)
+    if (act == (int) GGML_TYPE_Q8_K && strata::kernels::cpu::cpu_arm_neon_ok()) {
         strata::kernels::cpu::q8k_quant_avx2(x, dst, k);
         return;
     }
@@ -207,6 +208,13 @@ static bool want_512(int type, int nt) {
     //    double-pumped 256-bit / 1-port AVX-512; faster at 1..N tokens on VPOPCNTD sign-mask formats (16, 17, 18) and at nt >= 2
     //    on 21, 22, 23, 29 where weight decoding is amortized across tokens.
     const int fam = amd_family();
+    if (!strata::kernels::cpu::cpu_avx512_experts()) {   // STRATA_AVX512_EXPERTS off: the rule before upstream #5243
+        if (fam < 0x19) return false;
+        if (type == 16 || type == 17) return true;
+        if (type == 18) return nt >= 2;
+        if (type == 29) return nt >= 2 || fam >= 0x1A;
+        return false;
+    }
     const bool fast512 = fam >= 0x1A || strata::kernels::cpu::cpu_gather_fast();
     if (fast512) return type == 23 ? nt >= 2 : true;
     if (type == 16 || type == 17 || type == 18) return true;

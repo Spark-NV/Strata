@@ -14,7 +14,7 @@
 #include "strata/kernels/cpu/kq_avx2.hpp"
 #include "strata/kernels/cpu/iq_avx512.hpp"
 
-namespace strata::kernels::cpu { bool cpu_avx512_ok(); }
+namespace strata::kernels::cpu { bool cpu_avx512_experts(); }   // expert_layout.hpp (STRATA_AVX512_EXPERTS)
 
 #define GGML_COMMON_DECL_CPP
 #define GGML_COMMON_IMPL_CPP
@@ -229,7 +229,7 @@ void dot_rows(int type, const uint8_t* row, int n, const void* const* act, int n
 }  // namespace
 
 void bf16_rows_dot_multi(const uint16_t* w, int rows, int cols, const float* x, int nt, float* out) {
-    if (cpu_avx512_ok()) {
+    if (cpu_avx512_experts()) {
         bf16_rows_dot_multi_512(w, rows, cols, x, nt, out);
         return;
     }
@@ -260,7 +260,7 @@ void bf16_rows_dot_multi(const uint16_t* w, int rows, int cols, const float* x, 
 }
 
 void bf16_rows_dot(const uint16_t* w, int rows, int cols, const float* x, float* out) {
-    if (cpu_avx512_ok()) {
+    if (cpu_avx512_experts()) {
         bf16_rows_dot_512(w, rows, cols, x, out);
         return;
     }

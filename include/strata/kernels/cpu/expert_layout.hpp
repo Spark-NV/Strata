@@ -75,6 +75,12 @@ bool cpu_gather_fast_here();
 /// STRATA_FORCE_ISA, and not an older-CPU build (STRATA_ISA_FLOOR, which stays on its floor and AVX2).
 /// STRATA_NO_AVXVNNI=1 answers no.
 bool cpu_avxvnni_ok();
+/// STRATA_AVX512_EXPERTS=1 (and an AVX-512 CPU): the AVX-512 expert rows, quantizers and router dots of upstream #5243 -
+/// IQ4_XS gate/up from two tokens, IQ4_NL / Q2_0 / K-quant rows, the Q8_K quantizer, the 512-bit single-token tier and
+/// the BF16 router dots.  Off by default: every such call site then runs the code it ran before.  The IQ4_XS gate/up
+/// rows are ggml-cpu's bits at 1..6 tokens (iq4xs512_bench), yet the RTX 5090 IQ4_XS profile decoded no faster with them
+/// on a Ryzen 7 7800X3D (Zen 4: double-pumped 512-bit, the CPU experts bound by RAM), so it is for a Zen 5 / SPR CPU.
+bool cpu_avx512_experts();
 /// Arm64 (Apple M1-M5, Qualcomm Snapdragon X1/X2 Oryon, NVIDIA Grace Neoverse-V2 / DGX Spark GB10 / Vera) feature
 /// probes: NEON (AdvSIMD), FEAT_DotProd (SDOT/UDOT), FEAT_I8MM (SMMLA/USMMLA), and FEAT_BF16 (BFDOT).
 /// Always false on x86; STRATA_FORCE_ISA=none or STRATA_NO_ARM_NEON=1 disables them for fallback testing.

@@ -52,6 +52,14 @@ int cpu_isa_cap() {
     return cap;
 }
 
+bool cpu_avx512_experts() {
+    static const bool on = [] {
+        const char* e = std::getenv("STRATA_AVX512_EXPERTS");
+        return e != nullptr && e[0] != '\0' && std::atoi(e) != 0 && cpu_avx512_ok();
+    }();
+    return on;
+}
+
 #if !defined(__x86_64__) && !defined(__i386__) && !defined(_M_X64) && !defined(_M_IX86)
 bool cpu_avx512_ok() { return false; }
 bool cpu_avx512bw_ok() { return false; }
