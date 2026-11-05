@@ -439,3 +439,27 @@ the GPU serves change from run to run.
 
 For a Zen 5 CPU: set `"STRATA_AVX512_EXPERTS": "1"` in the profile's `env`
 and measure again.
+
+## Upstream pull requests for speed and quality (2026-11-05)
+
+Every upstream pull request was screened (2,765: 564 open, 2,171 closed unmerged, 30
+merged) for this PC and model. These were taken in, each opt-in, and measured here
+with a fresh server per arm (`ab-sw*`, `ab-fw*`, `ab-tk*`, `needle-*`):
+
+| Change | Same output | Result on this PC | In the profile |
+| --- | --- | --- | --- |
+| `STRATA_SELECT_TWO_PASS=1` (#4119): long-prompt selection scored once in TF32, again in 3xTF32 only near the cut-off | yes: its check found 0 of 2,184,420 queries with other cells | ~190K-token prompts 7,036-7,402 vs 6,890-7,387 tok/s (+0.2 to +2.1% in all six reads compared), shorter prompts and decode unchanged | on |
+| `short_answer_room` (#5189) | only acts on a thinking reply with a 48-1,023 token cap | a thinking reply under a short cap keeps room for its answer | on |
+| `reasoning_loop_recovery: "wrap"` (#4939) | only acts on a reasoning loop that repeats whole passages | the loop ends with an answer instead of an empty reply | on |
+| Tool-call parser and API fixes (#5183, #4754, #4832, #4828, #4835) | only on malformed or edge-case tool calls | stray backticks, Python-style `True`/`+10` arguments, Anthropic tool results out of order, `tool_choice: required` | always |
+| `STRATA_POOL_FUSED=1` (#2751): a CPU layer's gate/up and down without the barrier between them | yes: the same output hash | `pool_layer_bench`: -8% at 2-4 CPU experts a layer, none at 1-2; this decode serves about 1.6, so the CPU time per window did not move (4.33 / 4.54 vs 4.23 / 4.62 ms) | off |
+| `STRATA_IQ4_W4A8=1` (#4871, enabled here for compute capability 12.0): int8 kernel for the IQ4 prompt expert products | yes: `prefill_iq4_w4a8_test` 0 of 589,824,000 words differ on the RTX 5090 | 16K- and 57K-token prompts unchanged (5.3-5.9K and 7.1-7.5K tok/s in both arms) | off |
+| `--kv k16v8` (#2941): FP16 K, INT8 V | no (more precise keys) | prompts ~16% slower (5.9-6.2K vs 6.9-7.4K tok/s at ~190K), decode window 13.0-13.4 vs 12.8 ms; recall of five hidden codes at 100K tokens 30/30 with int8 and 30/30 with k16v8 | off |
+| `STRATA_EXPDEC`, `STRATA_QSA_ROWS`, `STRATA_B6_MMVQ_ROWS` (already in the fork, exact) | yes | window 13.53 vs 13.01 / 13.33 ms, story 185.8 vs 193.2 / 187.4 tok/s (one clean run; the second overlapped a build) | off |
+
+Left out: #2690 (defers CPU expert rows: +15% decode upstream at a KL of 0.09, the output
+changes), #3545 (relaxed MTP, changes the output), #2964 (keeps PCIe-fetched experts in
+VRAM; it turns itself off in the pinned RAM mode and with `STRATA_ADAPT_OVERLAP=1`, which
+this profile uses), #3960 (a broad tool-parser rewrite that conflicts with the fixes
+above), #4856, #2529, #2019 and #5203 (measured small or negative upstream, or not shown
+to keep the same cells).

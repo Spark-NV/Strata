@@ -1,0 +1,86 @@
+[
+ {
+  "trial": 0,
+  "prompt_tokens": 100245,
+  "hit": 5,
+  "answer": "yellow: 6783\nblue: 2624\nwhite: 2031\ngreen: 7448\nred: 8028",
+  "codes": {
+   "red": 8028,
+   "blue": 2624,
+   "green": 7448,
+   "yellow": 6783,
+   "white": 2031
+  },
+  "s": 16.8
+ },
+ {
+  "trial": 1,
+  "prompt_tokens": 100251,
+  "hit": 5,
+  "answer": "blue: 4244\nwhite: 3625\ngreen: 2495\nred: 1960\nyellow: 7181",
+  "codes": {
+   "red": 1960,
+   "blue": 4244,
+   "green": 2495,
+   "yellow": 7181,
+   "white": 3625
+  },
+  "s": 17.3
+ },
+ {
+  "trial": 2,
+  "prompt_tokens": 100240,
+  "hit": 5,
+  "answer": "white: 3135\nyellow: 3356\nblue: 7901\nred: 9535\ngreen: 4619",
+  "codes": {
+   "red": 9535,
+   "blue": 7901,
+   "green": 4619,
+   "yellow": 3356,
+   "white": 3135
+  },
+  "s": 17.3
+ },
+ {
+  "trial": 3,
+  "prompt_tokens": 100247,
+  "hit": 5,
+  "answer": "red: 9148\nblue: 6898\ngreen: 4628\nyellow: 8588\nwhite: 8319",
+  "codes": {
+   "red": 9148,
+   "blue": 6898,
+   "green": 4628,
+   "yellow": 8588,
+   "white": 8319
+  },
+  "s": 17.3
+ },
+ {
+  "trial": 4,
+  "prompt_tokens": 100247,
+  "hit": 5,
+  "answer": "blue: 2742\nwhite: 4077\nyellow: 9337\ngreen: 9842\nred: 7899",
+  "codes": {
+   "red": 7899,
+   "blue": 2742,
+   "green": 9842,
+   "yellow": 9337,
+   "white": 4077
+  },
+  "s": 16.8
+ },
+ {
+  "trial": 5,
+  "prompt_tokens": 100241,
+  "hit": 5,
+  "answer": "green: 9805\nblue: 7539\nyellow: 7726\nred: 8915\nwhite: 5922",
+  "codes": {
+   "red": 8915,
+   "blue": 7539,
+   "green": 9805,
+   "yellow": 7726,
+   "white": 5922
+  },
+  "s": 16.7
+ }
+]

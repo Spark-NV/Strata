@@ -68,3 +68,10 @@ nothing is read from the SSD. This needs `STRATA_EXCHANGE_ROTATE=1`.
 `"STRATA_AVX512_EXPERTS": "0"` keeps the AVX-512 expert kernels from upstream
 #5243 off. On this Ryzen 7 7800X3D they decoded no faster (results README,
 2026-11-05). Set it to `"1"` on a Zen 5 CPU and measure again.
+
+`"STRATA_SELECT_TWO_PASS": "1"` reads very long prompts about 1% faster with the
+same selected cells. `"short_answer_room": true` and
+`"reasoning_loop_recovery": "wrap"` only act when a thinking reply would end with
+no answer. `STRATA_POOL_FUSED`, `STRATA_IQ4_W4A8` and `--kv k16v8` are built in
+and off: they measured no faster here, or slower with no recall gain (results
+README, 2026-11-05).

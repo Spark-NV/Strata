@@ -27,6 +27,8 @@
   "model_name": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
   "log": "/home/spark/Apps/Strata/strata-orca-iq4_xs-fork.log",
   "fit_max_tokens": true,
+  "short_answer_room": true,
+  "reasoning_loop_recovery": "wrap",
   "expert_profile_save": "/home/spark/Apps/Strata/data/expert-profile-iq4_xs-learned.bin",
   "expert_profile_save_every": 5,
   "lib_dirs": ["/opt/cuda/bin", "/opt/cuda/lib64"],
@@ -51,6 +53,7 @@
     "STRATA_ADAPT_OVERLAP": "1",
     "STRATA_ADAPT_OVERLAP_RESIDENT": "1",
     "STRATA_EXCHANGE_ROTATE": "1",
-    "STRATA_AVX512_EXPERTS": "0"
+    "STRATA_AVX512_EXPERTS": "0",
+    "STRATA_SELECT_TWO_PASS": "1"
   }
 }
