@@ -390,3 +390,52 @@ decode 189.1, vision prompt 384.9 (check passes), prompts 1,037 / 4,770 /
 Cost: 2.75 GiB more page-locked RAM for the holds, about 1.7 GiB less for the
 RAM copy (the larger cache holds those experts), and a picture after 120 s
 without one waits about 1 s for the reader plus the shrink.
+
+## AVX-512 expert kernels from upstream #5243 (2026-11-05)
+
+Upstream [PR #5243](https://github.com/Niko1221/Strata/pull/5243) adds AVX-512
+expert, quantizer and router kernels for Zen 4/5 and Intel. It is merged here
+whole, behind one switch, `STRATA_AVX512_EXPERTS=1`. The switch is off: with it
+off, every call site the PR touched runs the code it ran before.
+
+This model's experts are IQ4_XS gate/up rows and IQ4_NL down rows in every
+layer. On this CPU, before the PR, the gate/up rows ran on ggml-cpu's
+one-token dot and the down rows on the AVX-2 kernel from two tokens.
+
+The PR's kernels on real experts of this model (`build-5090/iq4xs512_bench`,
+layers 0 and 7, one thread, microseconds per expert, from RAM):
+
+| Rows | Tokens: 1 | 2 | 3 | 4 | 5 | Same bits as ggml |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Gate/up, ggml (before) | 97.3 | 188.8 | 281.2 | 374.4 | 467.5 | - |
+| Gate/up, AVX-512 (PR) | 107.8 | 132.4 | 158.3 | 186.0 | 212.0 | yes, 1-6 tokens |
+| Down, AVX-2 (before) | 65.8 | 97.7 | 130.2 | 163.6 | 228.4 | no |
+| Down, AVX-512 (PR) | 70.6 | 107.3 | 139.2 | 174.4 | 243.2 | yes |
+
+The Q8_K quantizer took 0.45 us in AVX-2 and 0.47 us in AVX-512 (ggml 2.00).
+So on Zen 4 only the gate/up rows from two tokens are faster. The AVX-512 down
+rows are slower here and stay off with the switch on, unless the CPU runs
+512-bit at full width (Zen 5, Sapphire Rapids) or `STRATA_IQ4NL512=1`.
+
+Decode A/B, fresh server per arm, alternated (`ab-x512base*` = the installed
+engine, `ab-x512new*` = the PR's gate/up rows from two tokens):
+
+| | Base 1 | New 1 | Base 2 | New 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Story, 256 tokens (median tok/s) | 192.3 | 197.8 | 188.6 | 193.7 |
+| Code, 256 tokens (median tok/s) | 217.7 | 220.9 | 207.1 | 206.8 |
+| 16 new topics (total tok/s) | 122.1 | 131.5 | 132.5 | 131.0 |
+| Window (median ms) | 14.26 | 13.22 | 13.14 | 13.10 |
+| CPU gate/up per window (median ms) | 2.956 | 2.982 | 2.940 | 3.018 |
+| CPU pool read (GB/s) | 43.2 | 43.8 | 43.3 | 44.8 |
+
+No gain beyond the ±5% noise, and the CPU gate/up time did not move. Most CPU
+experts of a decode window serve one token, which keeps ggml's dot, and the
+pool reads RAM at about 43 of its ~58 GB/s, so faster arithmetic does not
+shorten it. Greedy answers to five fixed prompts were correct in every arm
+(old engine twice, new engine with the switch off and on). They are not
+byte-identical even between two runs of the same engine, because the experts
+the GPU serves change from run to run.
+
+For a Zen 5 CPU: set `"STRATA_AVX512_EXPERTS": "1"` in the profile's `env`
+and measure again.

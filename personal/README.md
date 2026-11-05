@@ -64,3 +64,7 @@ then the reader starts in about 1 s; 120 s after the last picture it stops and
 the cache grows back. The experts the shrink takes out of VRAM keep a copy in
 2.75 GiB of page-locked RAM set aside at start (`--vram-elastic-hold-mib`), so
 nothing is read from the SSD. This needs `STRATA_EXCHANGE_ROTATE=1`.
+
+`"STRATA_AVX512_EXPERTS": "0"` keeps the AVX-512 expert kernels from upstream
+#5243 off. On this Ryzen 7 7800X3D they decoded no faster (results README,
+2026-11-05). Set it to `"1"` on a Zen 5 CPU and measure again.
