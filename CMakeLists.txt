@@ -412,6 +412,17 @@ if(STRATA_BUILD_TESTS)
   target_include_directories(share_rules_test PRIVATE include)
   add_test(NAME share_rules_test COMMAND share_rules_test)
 
+  # STRATA_SELECT_TWO_PASS: the bound between the single-pass and 3xTF32 QSA block scores and the cut-off rule that
+  # keeps the selection (header-only, no GPU)
+  add_executable(qsa_two_pass_test tests/prefill/qsa_two_pass_test.cpp)
+  target_include_directories(qsa_two_pass_test PRIVATE include)
+  add_test(NAME qsa_two_pass_test COMMAND qsa_two_pass_test)
+  # STRATA_SELECT_TWO_PASS: the request's parse and the line it prints once where the scorer cannot run (no GPU)
+  add_executable(qsa_two_pass_status_test tests/prefill/qsa_two_pass_status_test.cpp)
+  target_include_directories(qsa_two_pass_status_test PRIVATE include)
+  add_test(NAME qsa_two_pass_status_test COMMAND qsa_two_pass_status_test
+           "${CMAKE_CURRENT_BINARY_DIR}/qsa_two_pass_status_test.log")
+           
   # STRATA_PREFILL_ROUTED_STREAM: the prompt stream's issuer walk and route gate, on a simulated link and consumer
   # (header-only, no GPU)
   add_executable(routed_stream_test tests/prefill/routed_stream_test.cpp)
@@ -623,6 +634,13 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
     target_link_libraries(qsa_scores_parity PRIVATE strata_kernels CUDA::cudart)
     add_test(NAME qsa_scores_parity COMMAND qsa_scores_parity)
     set_tests_properties(qsa_scores_parity PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "STRATA_SCORES_THREAD=1")
+    # STRATA_SELECT_TWO_PASS: the two-pass prompt scores' selection against the tensor-core scorer's, ids and the
+    # scored-again blocks bitwise (sm_80+, synthetic, no model)
+    add_executable(qsa_two_pass_parity src/kernels/qsa_two_pass_parity.cpp)
+    target_include_directories(qsa_two_pass_parity PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+    target_link_libraries(qsa_two_pass_parity PRIVATE strata_kernels CUDA::cudart)
+    add_test(NAME qsa_two_pass_parity COMMAND qsa_two_pass_parity)
+    set_tests_properties(qsa_two_pass_parity PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "STRATA_SELECT_TWO_PASS=1")
   endif()
   # QSAROWS (docs/QSAROWS.md): what the T rows of a verification window cost in a QSA layer's decode kernels at a long
   # context (block scores, top-k, attention over each row's selection, indexer append), row by row; GPU, synthetic, no
@@ -2291,6 +2309,12 @@ if(STRATA_NATIVE_EXPERTS)
   # MODEL-UPDATE: the pool's expert rows per format on T threads against the RAM bandwidth (a benchmark, no test)
   add_executable(kq_cpu_bench src/kernels/cpu/kq_cpu_bench.cpp)
   target_link_libraries(kq_cpu_bench PRIVATE strata_kernels_cpu)
+  # the real ExpertPool at decode's batch size (one layer's CPU experts a call), with an output hash: its batching
+  # against kq_cpu_bench, and STRATA_POOL_FUSED against the phases (upstream #2751)
+  if(NOT WIN32)
+    add_executable(pool_layer_bench src/kernels/cpu/pool_layer_bench.cpp)
+    target_link_libraries(pool_layer_bench PRIVATE strata_kernels_cpu)
+  endif()
   if(STRATA_BUILD_TESTS)
     add_test(NAME iq_avx2_parity COMMAND iq_avx2_parity)
     add_test(NAME iq_avx2_parity_iq3s_mt1 COMMAND ${CMAKE_COMMAND} -E env STRATA_IQ3S_MT1=1 $<TARGET_FILE:iq_avx2_parity>)
@@ -2366,7 +2390,7 @@ if(STRATA_NATIVE_EXPERTS)
     endif()
     # #136: the Q2_0 pack's prompt experts on Strata's own int8 kernels (moe_fused.cu, opt-in STRATA_PF_FUSED=1; CUDA
     # only: the HIP branch below keeps MMQ, and an sm_75 device or an sm_75-only build reports them unavailable)
-    add_library(strata_mmq STATIC src/prefill/moe_mmq.cu src/prefill/moe_fused.cu src/prefill/moe_fused_iq.cu
+    add_library(strata_mmq STATIC src/prefill/moe_mmq.cu src/prefill/moe_iq4_w4a8.cu src/prefill/moe_fused.cu src/prefill/moe_fused_iq.cu
                 src/prefill/mmq_nvfp4_w4a8.cu
                 src/prefill/ggml_cuda_host.cu ${_strata_quantize_cu})
     if(STRATA_EXPERIMENTAL_SM60 AND NOT STRATA_HIP_GFX906)
@@ -2565,6 +2589,14 @@ if(STRATA_NATIVE_EXPERTS)
         add_test(NAME prefill_ws_parity_test COMMAND prefill_ws_parity_test)
         set_tests_properties(prefill_ws_parity_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
       endif()
+    endif()
+    if(STRATA_BUILD_TESTS AND NOT STRATA_HIP_GFX906)
+      # STRATA_IQ4_W4A8: the IQ4 W4A8 expert kernel against MMQ, bit for bit, on the group buffers and (with
+      # STRATA_MMQ_TAB) the pointer table (exit 77 without a card or off sm_80..sm_88; gfx906: a stub, no test)
+      add_executable(prefill_iq4_w4a8_test tests/cuda/prefill_iq4_w4a8_test.cu)
+      target_link_libraries(prefill_iq4_w4a8_test PRIVATE strata_mmq ggml-base ${_strata_gpu_runtime_target})
+      add_test(NAME prefill_iq4_w4a8_test COMMAND prefill_iq4_w4a8_test)
+      set_tests_properties(prefill_iq4_w4a8_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
     endif()
     if(STRATA_BUILD_TESTS AND _strata_mmq_tab_on)
       # STRATA_MMQ_DIRECT: the pointer-table MMQ bit for bit against the gathered MMQ (exit 77 below sm_80)

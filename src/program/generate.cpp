@@ -1038,6 +1038,8 @@ void usage() {
                  "                       slightly lower precision (see bench/results/2026-09-27-kv-q4)\n"
                  "  --kv k8v4            hybrid: INT8 K (exact attention scores) + rotated Q4_0 V, 816 B/cell\n"
                  "                       (vs int8's 1,056); streams with --kv-resident too\n"
+                 "  --kv k16v8           mixed: FP16 K + INT8 V, 1,552 B/cell (vs fp16's 2,048, int8's 1,056);\n"
+                 "                       streams with --kv-resident too (SCR multi-source needs its archive support)\n"
                  "  --kv-resident N      KV streaming: keep N cells of each QSA layer in VRAM (min 20480) and the\n"
                  "                       whole K/V in pinned RAM; the freed VRAM goes to expert slots. 0 (default):\n"
                  "                       all of it in VRAM. A context of N cells or fewer is not streamed\n"
@@ -4119,8 +4121,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (o.kv == "q4") o.kv = "q4_0";
-    if (o.kv != "fp16" && o.kv != "int8" && o.kv != "q4_0" && o.kv != "k8v4") {
-        std::fprintf(stderr, "strata generate: --kv must be fp16, int8, q4_0 or k8v4\n");
+    if (o.kv != "fp16" && o.kv != "int8" && o.kv != "q4_0" && o.kv != "k8v4" && o.kv != "k16v8") {
+        std::fprintf(stderr, "strata generate: --kv must be fp16, int8, q4_0, k8v4 or k16v8\n");
         return 2;
     }
     strata::core::qsa_set_kv_int8(o.kv == "int8");
@@ -4132,6 +4134,7 @@ int main(int argc, char** argv) {
     if (kv_rot != nullptr && kv_rot[0] == '1' && o.kv == "int8")
         std::fprintf(stderr, "strata generate: STRATA_KV_ROT=1: INT8 K/V through the Hadamard rotation (opt-in)\n");
     strata::core::qsa_set_kv_hybrid(o.kv == "k8v4");   // K8V4: INT8 K + rotated Q4_0 V, 816 B/cell
+    strata::core::qsa_set_kv_f16k8v(o.kv == "k16v8");   // K16V8: FP16 K + INT8 V, 1,552 B/cell
     if (o.kv_resident < 0) {
         std::fprintf(stderr, "strata generate: --kv-resident must be >= 0\n");
         return 2;
@@ -20522,6 +20525,8 @@ int main(int argc, char** argv) {
                         pool.ms_multi_q / rounds, pool.ms_multi_down / rounds,
                         (double) pool.multi_bytes / 1e6 / std::max(1e-9, pool.ms_multi_gu + pool.ms_multi_down),
                         (drive.cpu_ms - pool_ms0) / rounds);
+        if (rounds > 0 && pool.multi_fused > 0)   // STRATA_POOL_FUSED: these layers' down rows are in the gate/up column
+            std::printf("; %lld layers fused", (long long) pool.multi_fused);
         if (rounds > 0 && pool.numa_slices() == 2)   // STRATA_NUMA_SPLIT: each slice's drain, publish to its last task
             std::printf("; numa slices: s0 %.3f ms  s1 %.3f ms", pool.numa_slice_ms(0) / rounds, pool.numa_slice_ms(1) / rounds);
         if (rounds > 0) std::printf("\n");
