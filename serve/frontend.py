@@ -16,6 +16,7 @@ and the formats change often; the engine boundary is token ids in, text deltas o
 from __future__ import annotations
 
 import json
+import math
 import logging
 import os
 import re
@@ -706,13 +707,15 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
             elif kind == "thinking":
                 reasoning.append(block.get("thinking", ""))
             elif kind == "tool_use":
-                calls.append({"function": {"name": block.get("name"), "arguments": tool_arguments(block.get("input"))}})
+                calls.append({"function": {"name": block.get("name"), "arguments": tool_arguments(block.get("input"))},
+                              "_call_id": block.get("id")})
             elif kind == "tool_result":
                 # A tool's image (Claude Code's Read of a picture) reaches the encoder like a user's, as the OpenAI
                 # path's tool messages already do; a text-only result is one string, as before.
                 messages.append({"role": "tool", "content": _parts_of(_check_parts(
                     _tool_references(block.get("content"), deferred),
-                    f"messages[{i}].content[{j}].content", TEXT_PARTS + IMAGE_PARTS))})
+                    f"messages[{i}].content[{j}].content", TEXT_PARTS + IMAGE_PARTS)),
+                                 "_call_id": block.get("tool_use_id")})
         if text or calls or reasoning or parts:
             # an image sent beside tool results stays in this turn instead of being dropped
             out = {"role": m["role"], "content": _parts_of(parts) if _has_image(parts) else "".join(text)}
@@ -721,6 +724,8 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
             if calls:
                 out["tool_calls"] = calls
             messages.append(out)
+    # A client may send results in the order its tools finished (Claude Code does for parallel calls)
+    _order_chat_tool_results(messages)
     tools = [_anthropic_tool(t) for t in declared if t["name"] not in deferred] or None
     kwargs = {}
     # Anthropic: "thinking": {"type": "disabled"} or {"type": "enabled", "budget_tokens": N};
@@ -912,8 +917,8 @@ def forced_call(tool_choice, tools: list[dict] | None) -> str | None:
         return None
     if kind == "required" and len(names) == 1:     # one tool to call: name it, the model cannot invent another
         kind, name = "named", next(iter(names))
-    if kind == "required" and names:
-        return CALL_START + "\n<function="
+    if kind == "required" and names:               # the model writes "<function=NAME>": from a written "<function=", Qwen3.8 went on with names no tool has
+        return CALL_START + "\n"
     if kind == "named" and name in names:
         return CALL_START + f"\n<function={name}>\n"
     print(f"[strata] tool_choice {json.dumps(tool_choice)[:200]} is not supported here (or names no tool of the "
@@ -1125,10 +1130,43 @@ def coerce_value(value: str, declared, notes: list | None = None):
     return v
 
 
+def _coerce_tool_value(value: str, schema: dict | None, notes: list | None = None):
+    """coerce_value, then typed scalar literals it leaves as text (`True`, `None`, `+5`) by the declared type.
+
+    This is not schema validation: valid JSON retains its original meaning, including quoted strings. Unknown
+    or incompatible non-JSON values stay unchanged rather than guessing (especially for boolean arguments).
+    """
+    declared = (schema or {}).get("type")
+    types = declared if isinstance(declared, list) else [declared]
+    if types == ["string"]:
+        return value
+    v = coerce_value(value, declared, notes)
+    if v is not value:
+        return v
+    v = value.strip()
+    low = v.lower()
+    # No top-level type does not mean no schema: enum, anyOf, $ref, etc. still declare the property.
+    untyped = not schema
+    if ("boolean" in types or untyped) and low in ("true", "false"):
+        return low == "true"
+    if ("null" in types or untyped) and low in ("null", "none"):
+        return None
+    if "integer" in types and re.fullmatch(r"[+-]?[0-9]+", v):
+        try:
+            return int(v)
+        except ValueError:
+            pass
+    if "number" in types and re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", v):
+        n = float(v)
+        if math.isfinite(n):
+            return n
+    return value
+
+
 def parse_tool_call(body: str, schema: dict | None = None, notes: list | None = None) -> ToolCall:
     """`<function=NAME>\\n<parameter=P>\\nVALUE\\n</parameter>...</function>` -> ToolCall. Values are JSON-decoded
-    when the tool's schema says the parameter is not a string (or, without a schema, when they parse as JSON
-    objects/arrays/numbers/booleans)."""
+    unless declared as a string. Non-JSON scalar literals are converted by the declared type. Without a property
+    schema, Python-style booleans and None are also accepted. Unrecognized values are kept unchanged."""
     body = body.strip()
     if not body.startswith("<function=") or ">" not in body:
         raise ValueError("malformed tool call: " + body[:80])
@@ -1147,7 +1185,7 @@ def parse_tool_call(body: str, schema: dict | None = None, notes: list | None = 
             value = value[1:]
         if value.endswith("\n"):
             value = value[:-1]
-        args[pname] = coerce_value(value, (props.get(pname) or {}).get("type"), notes)
+        args[pname] = _coerce_tool_value(value, props.get(pname), notes)
     return ToolCall(name=name, arguments=args)
 
 
@@ -1324,9 +1362,9 @@ class OutputParser:
         self._line_blocks = None
 
     def _track(self, text: str) -> str:
-        """Follow the reasoning text that has gone out: the open code fence, the current line, and the backticks of
-        the current paragraph.  Returns the text."""
-        # Most token fragments stay on the current line. Fence and paragraph
+        """Follow the reasoning text that has gone out: the open code fence, the current line and the inline-code
+        parity of the paragraph.  Returns the text."""
+        # Most token fragments stay on the current line. Fence and line
         # bookkeeping happens only when a newline completes that line.
         if "\n" not in text:
             if text:
@@ -1358,7 +1396,16 @@ class OutputParser:
                 elif not s:
                     self.ticks = 0
                 else:
+                    # #4923: an unmatched backtick followed by prose on its line ("Let me use `run_commands to
+                    # check.") is a stray marker, not the opening of a code span that goes on into the next line
+                    # and hides every later call.  A span does go on from a backtick at the end of its line ("Use `"
+                    # and the example on the next line) or one immediately followed by a tag ("Use `<tool_call>`"),
+                    # the two shapes #804/#1058 keep as text.
                     self.ticks += line.count("`")
+                    if self.ticks % 2 == 1:
+                        after = line[line.rfind("`") + 1:].strip()
+                        if after and not after.startswith("<"):
+                            self.ticks -= 1
                 # #4703: an indented (4 spaces or a tab) code block starts after a blank line and goes on until a line that is not indented
                 if was_fenced or self.fence:
                     self._prev_blank = self._indented = False
@@ -1376,7 +1423,7 @@ class OutputParser:
 
     def _opener_ok(self) -> bool:
         """The reasoning text so far puts a `<tool_call>` at the start of a line, outside a code fence and outside
-        inline code."""
+        inline code (`_in_code`)."""
         return not self.fence and not self.line.strip() and self.ticks % 2 == 0 and not self._in_indented_block()
 
     def _in_indented_block(self) -> bool:
@@ -1445,6 +1492,7 @@ class OutputParser:
         self.sfirst = True
         self.sval_started = False
         self.sdeclared = {}
+        self.sprops = {}
         self.spname = None
         self.svstart = 0
 
@@ -1484,6 +1532,7 @@ class OutputParser:
                 self.scall = ToolCall(name=name, arguments={})
                 props = ((self.schemas.get(name) or {}).get("parameters") or {}).get("properties") or {}
                 self.sdeclared = {k: (v or {}).get("type") for k, v in props.items()}
+                self.sprops = props
                 out.append(Event("tool_start", call=self.scall))
                 args("{")
                 self.sp += b + 1
@@ -1499,8 +1548,10 @@ class OutputParser:
                     args(("" if self.sfirst else ",") + json.dumps(pname) + ":")
                     self.sfirst = False
                     self.sp += b + 1
+                    self.sprop = self.sprops.get(pname)
                     self.spname = pname.strip()
-                    if self.sdeclared.get(pname) == "string":
+                    declared = (self.sprop or {}).get("type")
+                    if declared in ("string", ["string"]) or self.sdeclared.get(pname) == "string":
                         args('"')
                         self.ss, self.sval_started = "str", False
                     else:
@@ -1547,7 +1598,7 @@ class OutputParser:
                     value = value[1:]
                 if value.endswith("\n"):
                     value = value[:-1]
-                v = coerce_value(value, self.sdeclared.get(self.spname))    # the note comes with the final call (parse_tool_call)
+                v = _coerce_tool_value(value, self.sprop)    # the note comes with the final call (parse_tool_call)
                 args(json.dumps(v, ensure_ascii=False))
                 self.sp += end + len(PARAM_END)
                 self.ss = "between"

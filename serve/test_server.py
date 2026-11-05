@@ -1349,6 +1349,28 @@ class UnfinishedToolCall(unittest.TestCase):
             httpd.server_close()
         return out
 
+    def test_schema_typed_arguments_over_both_apis(self):
+        self.PROPS = {"unlock": {"type": "boolean"}, "count": {"type": "integer"},
+                      "optional": {"type": ["boolean", "null"]}, "note": {"type": "string"},
+                      "level": {"enum": ["None", "Low", "High"]},
+                      "label": {"anyOf": [{"type": "string"}, {"type": "null"}]}}
+        script = ("</think><tool_call><function=write><parameter=unlock>False</parameter>"
+                  "<parameter=count>+10</parameter><parameter=optional>None</parameter>"
+                  "<parameter=note>False</parameter><parameter=level>None</parameter>"
+                  "<parameter=label>False</parameter></function></tool_call>")
+        expected = {"unlock": False, "count": 10, "optional": None, "note": "False",
+                    "level": "None", "label": "False"}
+        for (api, stream), (reason, arguments) in self.answers(script).items():
+            with self.subTest(api=api, stream=stream):
+                self.assertEqual(reason, "tool_calls" if api == "openai" else "tool_use")
+                if stream:
+                    actual = json.loads(arguments)
+                else:
+                    actual = json.loads(arguments[0]) if api == "openai" else arguments[0]
+                self.assertEqual(actual, expected)
+                self.assertIs(actual["unlock"], False)
+                self.assertIs(type(actual["count"]), int)
+
     def test_a_cut_call(self):
         cut = '{"path":"notes.txt","content":"first half of the fi'
         self.assertEqual(self.answers(self.CUT), {
@@ -4324,6 +4346,63 @@ class ThinkingBudget(unittest.TestCase):
                                                      "messages": [{"role": "user", "content": "2+2?"}]})
         self.assertEqual(len(self.engine.prompts), 3)              # thinking off: no budget, one prompt each
 
+    def test_short_answer_room_is_opt_in(self):
+        """A short thinking reply can leave no answer; the opt-in wraps it with room left."""
+        from serve.server import REASONING_WRAP_UP
+        self.engine.THOUGHT = "Let me think step by step about two plus two. " * 40
+        code, before = self.openai(max_tokens=300)
+        self.assertEqual(code, 200, before)
+        self.assertEqual(before["choices"][0]["finish_reason"], "length")
+        self.assertFalse(before["choices"][0]["message"]["content"])
+        self.assertEqual(len(self.engine.prompts), 1)
+
+        self.svc.short_answer_room = True
+        code, after = self.openai(max_tokens=300)
+        self.assertEqual(code, 200, after)
+        msg = after["choices"][0]["message"]
+        self.assertEqual((msg["content"], after["choices"][0]["finish_reason"]), (ThinkingEngine.ANSWER, "stop"))
+        self.assertEqual(msg["reasoning_content"], self.engine.THOUGHT[:150] + REASONING_WRAP_UP.split("</think>")[0])
+        self.assertEqual(len(self.engine.prompts), 3)              # one original and two for the wrapped reply
+
+    def test_short_answer_room_keeps_the_existing_controls(self):
+        from serve.server import REASONING_WRAP_UP
+        self.engine.THOUGHT = "Let me think step by step about two plus two. " * 40
+        self.svc.short_answer_room = True
+        self.svc.answer_room = False
+        code, disabled = self.openai(max_tokens=300)
+        self.assertEqual(code, 200, disabled)
+        self.assertFalse(disabled["choices"][0]["message"]["content"])
+        self.assertEqual(len(self.engine.prompts), 1)
+
+        self.svc.answer_room = True
+        code, budgeted = self.openai(max_tokens=300, reasoning_budget_tokens=20)
+        self.assertEqual(code, 200, budgeted)
+        self.assertEqual(budgeted["choices"][0]["message"]["reasoning_content"],
+                         self.engine.THOUGHT[:20] + REASONING_WRAP_UP.split("</think>")[0])
+        self.assertEqual(len(self.engine.prompts), 3)
+
+        code, too_small = self.openai(max_tokens=47)
+        self.assertEqual(code, 200, too_small)
+        self.assertEqual(too_small["choices"][0]["finish_reason"], "length")
+        self.assertEqual(len(self.engine.prompts), 4)              # below the floor: no automatic wrap
+
+    def test_short_answer_room_streams_an_answer_on_both_apis(self):
+        self.engine.THOUGHT = "Let me think step by step about two plus two. " * 40
+        self.svc.short_answer_room = True
+        code, raw = self.openai(max_tokens=300, stream=True)
+        self.assertEqual(code, 200)
+        events = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: {")]
+        choices = [choice for event in events for choice in event.get("choices", [])]
+        self.assertEqual("".join(c.get("delta", {}).get("content") or "" for c in choices), ThinkingEngine.ANSWER)
+        self.assertEqual(choices[-1]["finish_reason"], "stop")
+
+        code, raw = self.post("/v1/messages", {"model": "m", "max_tokens": 300, "stream": True,
+            "thinking": {"type": "enabled"}, "messages": [{"role": "user", "content": "2+2?"}]})
+        self.assertEqual(code, 200)
+        events = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: {")]
+        text = "".join(e["delta"].get("text", "") for e in events if e["type"] == "content_block_delta")
+        self.assertEqual(text, ThinkingEngine.ANSWER)
+
     def test_anthropic_thinking_budget_tokens_is_a_budget(self):
         """0.1.45: thinking {type: enabled, budget_tokens: N} closes the thinking after N tokens (it was only a level)."""
         from serve.server import REASONING_WRAP_UP
@@ -4465,8 +4544,8 @@ class CallingEngine(MockEngine):
     def generate(self, ids, max_new, sampling, cancel, embeddings=None):
         self.prompts.append(list(ids))
         prompt = self.tok.decode(ids)
-        if prompt.endswith("<function="):
-            text = "search>\n" + self.ARGS
+        if prompt.endswith("<tool_call>\n"):
+            text = "<function=search>\n" + self.ARGS
         elif prompt.endswith("<function=search>\n"):
             text = self.ARGS
         elif prompt.endswith("</think>\n\n"):
@@ -4645,7 +4724,7 @@ class ForcedToolChoice(unittest.TestCase):
                     self.assertEqual((finish, calls), ("tool_calls", [("search", {"q": "2+2"})]))
                     self.assertEqual(reasoning, CallingEngine.THOUGHT)
                     first, second = self.engine.prompts
-                    opening = "<tool_call>\n<function=" + ("search>\n" if choice == self.NAMED else "")
+                    opening = "<tool_call>\n" + ("<function=search>\n" if choice == self.NAMED else "")
                     # where the thinking ended, after the blank line the template puts before a call
                     self.assertEqual(second, first + self.tok.encode(CallingEngine.THOUGHT + "</think>\n\n" + opening))
 
@@ -4654,7 +4733,7 @@ class ForcedToolChoice(unittest.TestCase):
         thought, calling = 'I will search for "2+2"', self.engine.generate
 
         def generate(ids, max_new, sampling, cancel, embeddings=None):
-            if self.tok.decode(ids).endswith(("<function=", "<function=search>\n")):
+            if self.tok.decode(ids).endswith(("<tool_call>\n", "<function=search>\n")):
                 yield from calling(ids, max_new, sampling, cancel)
                 return
             self.engine.prompts.append(list(ids))
@@ -4667,7 +4746,7 @@ class ForcedToolChoice(unittest.TestCase):
                 finish, calls, reasoning = self.call_of(code, b, stream)
                 self.assertEqual((finish, calls, reasoning), ("tool_calls", [("search", {"q": "2+2"})], thought))
                 first, second = self.engine.prompts
-                self.assertEqual(second, first + self.tok.encode(thought + "</think>\n\n<tool_call>\n<function="))
+                self.assertEqual(second, first + self.tok.encode(thought + "</think>\n\n<tool_call>\n"))
 
     def test_without_thinking_the_prompt_ends_with_the_opening(self):
         for choice in ("required", self.NAMED):
@@ -4678,7 +4757,7 @@ class ForcedToolChoice(unittest.TestCase):
                     finish, calls, reasoning = self.call_of(code, b, stream)
                     self.assertEqual((finish, calls, reasoning), ("tool_calls", [("search", {"q": "2+2"})], ""))
                     self.assertEqual(len(self.engine.prompts), 1)
-                    opening = "<tool_call>\n<function=" + ("search>\n" if choice == self.NAMED else "")
+                    opening = "<tool_call>\n" + ("<function=search>\n" if choice == self.NAMED else "")
                     self.assertTrue(self.tok.decode(self.engine.prompts[0]).endswith("</think>\n\n" + opening))
 
     def test_the_budget_wrap_up_opens_the_call(self):
@@ -4688,7 +4767,7 @@ class ForcedToolChoice(unittest.TestCase):
         self.assertEqual((finish, calls), ("tool_calls", [("search", {"q": "2+2"})]))
         self.assertEqual(reasoning, CallingEngine.THOUGHT[:20] + REASONING_WRAP_UP.split("</think>")[0])
         first, second = self.engine.prompts
-        extra = self.tok.encode(REASONING_WRAP_UP + "<tool_call>\n<function=", parse_special=True)
+        extra = self.tok.encode(REASONING_WRAP_UP + "<tool_call>\n", parse_special=True)
         self.assertEqual(second, first + self.tok.encode(CallingEngine.THOUGHT[:20]) + extra)
 
     def test_auto_absent_and_none_leave_the_tools_to_the_model(self):

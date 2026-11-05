@@ -217,7 +217,7 @@ VISION_START = "<|vision_start|>"
 REPEAT_STOP_TOKENS = 256
 ANSWER_ROOM_MIN_CAP = 1024    # 0.1.45: from this max_tokens on, thinking without a budget is closed early enough to leave room to answer
 DS41_DEFAULT_BUDGET = 32768   # DeepSeek-V4.1 only: the thinking budget when neither the request nor the config names one
-DS41_SMALL_CAP_MIN = 48       # DeepSeek-V4.1 only: from this max_tokens up to ANSWER_ROOM_MIN_CAP, thinking is capped at half of it
+DS41_SMALL_CAP_MIN = 48       # DeepSeek-V4.1, or opt-in short_answer_room: below ANSWER_ROOM_MIN_CAP, cap thinking at half
 ANSWER_RESERVE_MIN = 512     # #984: the tokens kept for the answer when a thinking budget is cut down to fit max_tokens
 # #123: what closes the thinking when it reaches reasoning_budget_tokens (the model's own end-of-thinking tag after it)
 # #1053 (opt-in "reasoning_close_retry": true): a reply that ends on its stop token still inside <think>, with no answer
@@ -226,7 +226,9 @@ REASONING_CLOSE = "\n</think>\n\n"
 REASONING_WRAP_UP = "\n\nI have thought about this long enough; time to give my answer.\n</think>\n\n"
 # #728: opt-in handling of reasoning that repeats whole passages (which the single-token guard above cannot see).
 # "reasoning_loop_recovery": "stop" ends the reply there; "recover" (or true) goes on from the same output with the
-# low-effort instruction in place of the xhigh one.  Both off by default.
+# low-effort instruction in place of the xhigh one; "wrap" closes the thinking as reasoning_budget_tokens does, so the
+# model answers; "nudge" goes on with temperature >= 1.0 and presence_penalty >= 1.5 and wraps on a second fire.  With
+# "wrap" or "nudge" a #606 one-token run inside the thinking is handled the same way.  All off by default.
 HIGH_EFFORT = EFFORT_TEXT["xhigh"]
 LOW_EFFORT = EFFORT_TEXT["low"]
 LOOP_CHECK_EVERY = 512           # output tokens between two looks at the reasoning (at a clean parser boundary)
@@ -4498,6 +4500,7 @@ class Service:
         self.fit_max_tokens = fit_max_tokens          # default: clamp the output cap to the room left; False (--no-fit-max-tokens) = 400
         self.aliases: list[str] = []                  # #297: other names of the model (the config's `aliases`)
         self.answer_room = True                       # 0.1.45: see ANSWER_ROOM_MIN_CAP (the config's "answer_room": false turns it off)
+        self.short_answer_room = False                # opt-in: the same protection for short output caps on other families
         self.reasoning_close_retry = False            # #1053 (opt-in): close the thinking once when a reply ends inside it
         self.codex_compaction_cache = False           # #924 (opt-in): a Codex compaction is rendered with its conversation's tools
         self.codex_thread_titles = False              # #923 (opt-in): answer Codex's thread-title turns without the engine
@@ -5899,11 +5902,10 @@ class Service:
             budget = max_new - min(max(ANSWER_RESERVE_MIN, max_new // 4), max_new // 2)
             if max_new <= 32768: print(f"[strata] thinking limited to {budget} of max_tokens {max_new} so the answer has room "
                   "(\"answer_room\": false in the config turns this off)", flush=True)
-        if (thinking and not budget and self.answer_room and self.family == "deepseek41"
+        if (thinking and not budget and self.answer_room and (self.family == "deepseek41" or self.short_answer_room)
                 and max_new and DS41_SMALL_CAP_MIN <= max_new < ANSWER_ROOM_MIN_CAP):
-            # DeepSeek-V4.1 only: a short max_tokens (/v1/messages and /v1/chat/completions with 200-600) was spent
-            # entirely on the thinking, so no text block ever arrived.  With no budget of the client's own, the thinking
-            # is capped at half of max_tokens; then the wrap-up, </think> and the answer follow in the other half.
+            # A short max_tokens can be spent entirely on thinking, leaving no visible answer. DeepSeek-V4.1 already
+            # reserves room here; other families may opt in. A client's explicit positive budget still takes precedence.
             budget = max_new // 2
             print(f"[strata] thinking limited to {budget} of max_tokens {max_new} so the answer has room "
                   "(\"answer_room\": false in the config turns this off)", flush=True)
@@ -5951,6 +5953,7 @@ class Service:
         timings, before = None, None                    # this request's timings; the engine's `last` before it
         recovery_count, reasoning_text, repeat_coverage = 0, "", 0.0
         looped, next_loop_check = False, LOOP_CHECK_EVERY       # #728: reasoning that repeats whole passages
+        loop_wrap = False                               # "wrap"/"nudge": the detector closed the thinking
         raw_ids = []                                    # every generated id (STRATA_DEBUG: dump raw model text)
         emb, self.embeddings.path = getattr(self.embeddings, "path", None), None   # this run's to delete now
         img_keys, self.embeddings.keys = getattr(self.embeddings, "keys", None), None
@@ -6066,6 +6069,7 @@ class Service:
                         gen = self.engine.generate(prompt, max_new - n, sampling, cancel, embeddings=emb) if emb \
                             else self.engine.generate(prompt, max_new - n, sampling, cancel)
                         recover_prompt = None
+                        nudge = False                   # "nudge": this pass ended on its first fire
                         seg, wrap, leaving = [], False, False   # this pass's tokens; the budget is reached; closed
                         nonfinite = False               # #879: the engine ended this pass on non-finite logits
                         opens = False                   # the thinking is over: write the forced call's opening
@@ -6105,6 +6109,23 @@ class Service:
                                 run_len = run_len + 1 if t == run_tok else 1
                                 run_tok = t
                                 if self.repeat_stop_tokens and run_len >= self.repeat_stop_tokens:
+                                    # with "wrap"/"nudge" a one-token run in the thinking is a loop like any other
+                                    if (self.reasoning_loop_recovery in ("wrap", "nudge") and parser.state == "reasoning"
+                                            and recovery_count < (2 if self.reasoning_loop_recovery == "nudge" else 1)
+                                            and not parser.buf and not parser.pending and not detok.pending()):
+                                        repeat_coverage, run_len = 1.0, 0
+                                        print(f"[strata] the thinking repeated one token "
+                                              f"({self.tok.decode([run_tok])!r}) {self.repeat_stop_tokens} times (#606)", flush=True)
+                                        if self.reasoning_loop_recovery == "nudge" and not recovery_count:
+                                            nudge = True
+                                            break
+                                        wrap = loop_wrap = True
+                                        recovery_count += 1
+                                        with self.status_lock:
+                                            st["reasoning_recoveries"] = recovery_count
+                                        if trace is not None:
+                                            trace["reasoning_recoveries"] = recovery_count
+                                        break
                                     repeated = True     # #606: a degenerate output, not an answer: end it here
                                     break
                                 piece = detok.push(t)
@@ -6126,7 +6147,9 @@ class Service:
                                 if stops is not None and stops.hit is not None:
                                     finish = "stop"         # gen.close() below STOPs the engine, as for a stop token
                                     break
-                                if (self.reasoning_loop_recovery and not recovery_count and parser.state == "reasoning"
+                                if (self.reasoning_loop_recovery
+                                        and recovery_count < (2 if self.reasoning_loop_recovery == "nudge" else 1)
+                                        and parser.state == "reasoning"
                                         and n >= next_loop_check and not parser.buf and not parser.pending
                                         and not detok.pending()):
                                     next_loop_check = n + LOOP_CHECK_EVERY
@@ -6134,6 +6157,19 @@ class Service:
                                     if repeat_coverage >= LOOP_COVERAGE:
                                         if self.reasoning_loop_recovery == "stop":
                                             looped = True        # #728: end the reply here, as for a repeated token
+                                            break
+                                        # "nudge" first resamples, then wraps; "wrap" wraps
+                                        if self.reasoning_loop_recovery == "nudge" and not recovery_count:
+                                            nudge = True
+                                            break
+                                        if self.reasoning_loop_recovery in ("wrap", "nudge"):
+                                            wrap = loop_wrap = True
+                                            recovery_count += 1
+                                            with self.status_lock:
+                                                st["reasoning_recoveries"] = recovery_count
+                                            if trace is not None:
+                                                trace["reasoning_recoveries"] = recovery_count
+                                                trace["reasoning_repeat_coverage"] = round(repeat_coverage, 3)
                                             break
                                         if not emb:              # "recover": not for a request with pictures
                                             recover_prompt = focused_recovery_prompt(self.tok, ids, raw_ids)
@@ -6203,6 +6239,23 @@ class Service:
                                   "reads its prompt from the start", flush=True)
                             finish = "length"
                             break
+                        if nudge and not cancel.is_set() and n < max_new:   # "nudge": go on with the sampling raised
+                            recovery_count += 1
+                            want = (max(1.0, float((sampling or {}).get("temperature") or 0)),
+                                    max(1.5, float((sampling or {}).get("presence_penalty") or 0)))
+                            sampling = {**(sampling or {}), "temperature": want[0], "presence_penalty": want[1]}
+                            prompt = prompt + seg
+                            reasoning_text = ""              # the detector's window starts again from here
+                            next_loop_check = n + LOOP_CHECK_EVERY
+                            with self.status_lock:
+                                st["reasoning_recoveries"] = recovery_count
+                            if trace is not None:
+                                trace["reasoning_recoveries"] = recovery_count
+                                trace["reasoning_repeat_coverage"] = round(repeat_coverage, 3)
+                            print(f"[strata] repeated reasoning detected at {n} tokens (coverage={repeat_coverage:.3f}); "
+                                  f"going on with temperature {want[0]} and presence_penalty {want[1]} "
+                                  "(reasoning_loop_recovery: nudge)", flush=True)
+                            continue
                         if recover_prompt is not None and not cancel.is_set() and n < max_new:
                             recovery_count += 1
                             # Only the two settings that keep the same words coming are raised (temperature to at
@@ -6261,7 +6314,11 @@ class Service:
                         extra = self.tok.encode(text, parse_special=True)
                         if max_new - n - len(extra) < 1:
                             break                       # no room left to answer: "length", as without a budget
-                        if wrap:
+                        if wrap and loop_wrap:                          # the loop detector closed it
+                            print(f"[strata] repeated reasoning detected at {n} tokens (coverage={repeat_coverage:.3f}): "
+                                  "wrapping up the thinking (reasoning_loop_recovery: "
+                                  f"{self.reasoning_loop_recovery})", flush=True)
+                        elif wrap:
                             print(f"[strata] thinking budget reached ({thought} tokens): wrapping up the thinking",
                                   flush=True)
                         for t in extra:
@@ -8354,7 +8411,7 @@ def make_handler(svc: Service):
             cancel = threading.Event()
             self._watch_client(cancel)                       # #430 #431 (#1999: before prepare, which can take long)
             try:
-                ids, thinking, tools, max_new, asm, validator, req = self._responses_prepare(req, cancel)
+                ids, thinking, tools, max_new, asm, validator, req, force = self._responses_prepare(req, cancel)
             except ClientGone:
                 self._note(outcome="disconnected")
                 return
@@ -8371,7 +8428,7 @@ def make_handler(svc: Service):
             def events():
                 yield from asm.start()
                 done = None
-                for kind, x in svc.run(ids, thinking, tools, max_new, req, cancel):
+                for kind, x in svc.run(ids, thinking, tools, max_new, req, cancel, force):
                     if kind == "ping":
                         yield None
                     elif kind == "event":
@@ -8445,6 +8502,7 @@ def make_handler(svc: Service):
             responses_api.check_request(req)
             messages = responses_api.input_messages(req)
             tools, names, skipped = responses_api.request_tools(req)
+            force = svc.force_text(forced_call(req.get("tool_choice"), tools))   # "required" / {"type": "function", "name": N}
             kw = responses_api.template_kwargs(req, {"reasoning_effort": svc.effort_default()})
             try:
                 self._no_local_images(messages)              # as on the chat route: no file read for a foreign page
@@ -8479,14 +8537,14 @@ def make_handler(svc: Service):
             shown = responses_api.prompt_tools(req, tools) if svc.codex_compaction_cache else tools
             try:
                 try:
-                    ids, thinking, max_new = svc.prepare(messages, shown, kw, req.get("max_output_tokens") or 0, req=req,
-                                                          cancel=cancel)
+                    ids, thinking, max_new = svc.prepare(messages, shown, kw, req.get("max_output_tokens") or 0, force=force,
+                                                          req=req, cancel=cancel)
                 except ValueError:
                     if shown is tools:
                         raise
                     shown = tools                            # too long with the kept tools: the request as sent
-                    ids, thinking, max_new = svc.prepare(messages, shown, kw, req.get("max_output_tokens") or 0, req=req,
-                                                          cancel=cancel)
+                    ids, thinking, max_new = svc.prepare(messages, shown, kw, req.get("max_output_tokens") or 0, force=force,
+                                                          req=req, cancel=cancel)
             except ResponsesError:
                 raise
             except ValueError as e:                          # too long for the context, an image without vision
@@ -8499,7 +8557,7 @@ def make_handler(svc: Service):
             asm = responses_api.Assembler(req, svc.model_for(req), len(ids), names,
                                           "reasoning.encrypted_content" in include, validator is not None)
             # the request is also the sampling dict, as on the chat path (temperature, top_p, top_k, seed, ...)
-            return ids, thinking, tools, max_new, asm, validator, req
+            return ids, thinking, tools, max_new, asm, validator, req, force
 
         def _count_tokens(self, req):
             """Anthropic's token count, which Claude Code asks for its context figures: the prompt this server would
@@ -9857,6 +9915,7 @@ def main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> in
         per_replica = requested if isinstance(requested, int) and not isinstance(requested, bool) and requested > 0 else 1
         svc.requested_slots = per_replica * len(groups) if groups else per_replica
     svc.answer_room = cfg.get("answer_room") is not False
+    svc.short_answer_room = cfg.get("short_answer_room") is True
     svc.reasoning_close_retry = cfg.get("reasoning_close_retry") is True    # #1053: opt-in, off by default
     if cfg.get("images"):                               # image generation (serve/images.py), set up by setup --images
         icfg = {k: (os.path.abspath(os.path.join(cfg.get("cwd") or ".", v))
@@ -9969,11 +10028,12 @@ def main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> in
         if budget:
             print(f"[strata] thinking budget: {budget} tokens (reasoning_budget_tokens; a request can set its own)",
                   flush=True)
-    recovery = cfg.get("reasoning_loop_recovery", False)   # #728: false (default) | "stop" | "recover" (true)
+    recovery = cfg.get("reasoning_loop_recovery", False)   # #728: false (default) | "stop" | "recover" (true) | "wrap" | "nudge"
     if recovery is True:
         recovery = "recover"
-    if recovery is not False and recovery not in ("stop", "recover"):
-        raise SystemExit("[strata] config \"reasoning_loop_recovery\" must be false, \"stop\" or \"recover\", "
+    if recovery is not False and recovery not in ("stop", "recover", "wrap", "nudge"):
+        raise SystemExit("[strata] config \"reasoning_loop_recovery\" must be false, \"stop\", \"recover\", "
+                         "\"wrap\" or \"nudge\", "
                          f"not {recovery!r}")
     svc.reasoning_loop_recovery = recovery
     svc.gpu_index = (gpu_list(cfg) or [0])[0]           # the Monitor reads the card the engine runs on (issue #51)
