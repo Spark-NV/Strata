@@ -463,3 +463,32 @@ VRAM; it turns itself off in the pinned RAM mode and with `STRATA_ADAPT_OVERLAP=
 this profile uses), #3960 (a broad tool-parser rewrite that conflicts with the fixes
 above), #4856, #2529, #2019 and #5203 (measured small or negative upstream, or not shown
 to keep the same cells).
+
+## Speedy (DevDock-AI/Speedy) screen, 2026-11-06
+
+Speedy is a fork of Strata 0.2.7.1 tuned for one or two RTX 3080 10 GB cards. Most of its gains come from two cards
+(layer split, decode overlap), GPU unlocking, or the rebase onto 0.2.7.1, which this tree is already past. Its single-GPU
+switches exist here as opt-ins. Measured on the RTX 5090 + 7800X3D, IQ4_XS, fresh server per arm, two rounds each:
+
+| Arm | Prompt 8K / 32K / 190K tok/s (round 1; round 2) | Decode story / code tok/s |
+|---|---|---|
+| base | 5813 / 7180 / 7284; 5929 / 7307 / 7239 | 188 / 197; 183 / 216 |
+| `STRATA_PF_GROUP_SCRATCH=1 STRATA_PF_HC_REGION=1` (#4039) | 5881 / 7362 / 7285; 5802 / 7280 / 7313 | 188 / 212; 193 / 198 |
+| `STRATA_PREFILL_ROUTED_STREAM=1` (#4283) | 5887 / 7312 / 7228; 5902 / 7283 / 7206 | 196 / 201; 193 / 227 |
+| `STRATA_KV_PREFETCH=1` | 5869 / 7284 / 7310; 5874 / 7317 / 7334 | 191 / 194; 184 / 201 |
+| all three | 5895 / 7247 / 7219; 6063 / 7354 / 7364 | 189 / 204; 196 / 206 |
+
+All are within noise (prompt about ±1%, decode about ±5%). The group scratch does not engage here (the IQ4_XS prompt
+path uses fused buffers; the chunk is already 32768), every expert is routed in a 32K chunk so the routed stream skips
+nothing, and KV prefetch stages no layer. All three stay off. Not taken because they change answers:
+`STRATA_VERIFY_DEFER_CPU` (#2690, rejected before) and `STRATA_HC_Q8` (8-bit hyper-connection activations).
+
+Taken from Speedy: three correctness fixes, no speed change.
+- #4844: a pipelined adaptive round marks its whole swap batch, so a round that finishes serially cannot copy back a
+  stale range (this profile runs the pipelined path, `STRATA_ADAPT_OVERLAP=1`).
+- #5096: an empty DMA group in a split verify window raises its flag after the earlier group's copies, not before.
+- Speedy #4: the layer-major prompt path caps a group at the group-scratch rows (NaN rows on ~29K+ prompts with
+  `STRATA_PF_GROUP_SCRATCH=1`; not reachable in this profile, fixed for when it is).
+
+Check run with the fixed engine: 8K / 32K / 190K prompts 5944 / 7252 / 7119 tok/s, all answers correct; decode story
+204, code 222; 0 blob reads from the file after 37,844 exchanges with the VRAM tier.
