@@ -1,0 +1,8 @@
+reference: /tmp/claude-1000/-home-spark-Apps-Strata/6ee7578a-dd28-4460-ae50-897b8a1f2188/scratchpad/qq/base.tsv
+run                                      segment         pos    top1       KL   KL p99     PPL PPL ref
+bf16.tsv                                 code            999  97.70%  0.00981      nan   2.093   2.095
+bf16.tsv                                 docs            999  88.19%  0.04555      nan  10.618  10.851
+bf16.tsv                                 english         999  93.99%  0.01573      nan   4.429   4.419
+bf16.tsv                                 multilingual    999  97.20%  0.01172      nan   2.770   2.768
+bf16.tsv                                 agent           999  93.59%  0.08184      nan   4.014   4.166
+bf16.tsv                                 all            4995  94.13%  0.03293   0.4186   4.053   4.100

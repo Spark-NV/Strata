@@ -5,6 +5,7 @@
     "--native", "/home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Uncensored-IQ4_XS-00001-of-00003.gguf",
     "--ple-gguf", "/home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Uncensored-IQ4_XS-00001-of-00003.gguf",
     "--ple-io", "mmap",
+    "--embd-gguf", "/home/spark/Apps/MODELS/token-embd-bf16-uncensored.gguf",
     "--expert-profile", "/home/spark/Apps/Strata/data/expert-profile-iq4_xs-learned.bin",
     "--expert-cache", "auto",
     "--mmap-experts",

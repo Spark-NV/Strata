@@ -492,3 +492,33 @@ Taken from Speedy: three correctness fixes, no speed change.
 
 Check run with the fixed engine: 8K / 32K / 190K prompts 5944 / 7252 / 7119 tok/s, all answers correct; decode story
 204, code 222; 0 blob reads from the file after 37,844 exchanges with the VRAM tier.
+
+## BF16 token embedding for the abliterated model, 2026-11-06 (on)
+
+The IQ4_XS GGUF stores `token_embd.weight` as IQ4_XS: 7.8% relative error per row (upstream PR #5433 measured 8.07% on
+Unsloth's UD-IQ4_XS). Every token enters layer 0 with that error. The engine's `--embd-gguf` reads a BF16 table instead;
+it sits in mapped host RAM (1212 MiB instead of 322 MiB, no VRAM) and only the rows of the tokens in flight cross PCIe.
+
+The abliterated BF16 checkpoint (orcarouter) is gated, so `tools/embd_bf16_ablit.py` rebuilds the table from Qwen's open
+BF16 `embed_tokens.weight` (shard 130 of `Qwen/Qwen3.8-Flash-Next`, read by byte range). Abliteration took one direction
+out of the embedding: 5.34% of the base-minus-GGUF difference lies on one direction (random noise would put 0.039%
+there), the projection strength fits as alpha 0.9956 (1.0 = fully removed), row norms are unchanged (0.45425 / 0.45430),
+and after removing that direction from the base table what is left of the difference along it is 0.000583, the level of a
+random direction (0.000557): only quantization noise remains. The tool writes base - (base r) r^T in BF16.
+
+Teacher-forced on `data/quant_quality/v1` (`tools/quant_quality.py`, 4,995 positions, GPU experts fixed, no adaptation;
+`session2/embd-bf16/`). Lower perplexity is better; the IQ4_XS table run twice gives 100.00% agreement and KL 0:
+
+| Segment | PPL IQ4_XS table | PPL BF16 table | top-1 agreement | KL |
+|---|---:|---:|---:|---:|
+| code | 2.095 | 2.093 | 97.70% | 0.0098 |
+| docs | 10.851 | 10.618 | 88.19% | 0.0456 |
+| english | 4.419 | 4.429 | 93.99% | 0.0157 |
+| multilingual | 2.768 | 2.770 | 97.20% | 0.0117 |
+| agent | 4.166 | 4.014 | 93.59% | 0.0818 |
+| all | 4.100 | 4.053 | 94.13% | 0.0329 |
+
+Speed, fresh server per arm, two rounds: mixed decode 129.6 / 130.2 tok/s (IQ4_XS table) vs 127.8 / 129.3 (BF16),
+story 183 / 193 vs 200 / 201, code 198 / 218 vs 212 / 209, 32K prompt 6872-7369 vs 6850-7571 tok/s: within noise.
+On in the profile (`--embd-gguf /home/spark/Apps/MODELS/token-embd-bf16-uncensored.gguf`). Rebuild it with:
+`python tools/embd_bf16_ablit.py --official <embed_tokens.bf16> --gguf <the IQ4_XS GGUF> --out <token-embd-bf16.gguf>`.

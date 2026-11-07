@@ -1,0 +1,3 @@
+reference: /tmp/claude-1000/-home-spark-Apps-Strata/6ee7578a-dd28-4460-ae50-897b8a1f2188/scratchpad/qq/base.tsv
+run                                      segment         pos    top1       KL   KL p99     PPL PPL ref
+base2.tsv                                all            4995 100.00%  0.00000   0.0000   4.100   4.100

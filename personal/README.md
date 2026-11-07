@@ -75,3 +75,10 @@ same selected cells. `"short_answer_room": true` and
 no answer. `STRATA_POOL_FUSED`, `STRATA_IQ4_W4A8` and `--kv k16v8` are built in
 and off: they measured no faster here, or slower with no recall gain (results
 README, 2026-11-05).
+
+The token embedding is read in BF16 from
+`/home/spark/Apps/MODELS/token-embd-bf16-uncensored.gguf` (`--embd-gguf`) instead
+of the GGUF's IQ4_XS copy: perplexity 4.100 -> 4.053 on the quality set, speed
+unchanged, 1212 MiB of host RAM instead of 322 MiB (results README). The file is
+Qwen's BF16 table with the abliteration's refusal direction removed
+(`tools/embd_bf16_ablit.py`); remove the two `--embd-gguf` lines to go back.
