@@ -121,3 +121,38 @@ sampling, output cap, tools on or off, approval mode, which tool groups and conn
 skills. A profile's tools and skills are left out of what the model is offered and refused by the
 approval gate if it asks for them anyway. `STRATA_PROFILE_DEBUG=<file>` logs, per agent request, the
 tools before and after the profile and the sampling sent.
+
+Each profile also has (Settings -> Profiles): memory switches (use memory, save to memory), web search
+without the once-per-chat question, agents and slash commands. Defaults: Chat and Code use and save
+memory and search without asking; RP has none of it.
+
+- **Memory** (`apps/host/server/memory.mjs`, list in Settings -> Memory, file `~/.strata/data/memory.json`):
+  a profile with memory on gets the list in its system prompt; with saving on the agent has
+  `remember` / `recall` / `forget` (`apps/host/server/agent/memory-mcp.mjs`), which never ask.
+- **Agents**: named helpers the model starts with the subagent tool as `@name task`. The forwarding
+  endpoint sees the `@name` in the helper's first message and gives it that agent's instructions and
+  only its tools (groups like `find` or single tools like `read`). Code starts with `@explorer`
+  (read-only), `@reviewer` and `@tester`; Chat with `@researcher`.
+- **Commands**: `/name text` sends the command's prompt with `$ARGUMENTS` replaced (client side, the
+  chat shows what was typed). Code: `/review /test /commit /fix /explain`; Chat: `/summarize /explain
+  /proofread /compare`. The built-in `/plan /goal /research /compact /loop` still work.
+
+### Roleplay
+
+RP chats are SillyTavern-style (`apps/host/server/rp/`): the RP group's + opens the Roleplay library
+(characters, personas, lorebooks; files in `~/.strata/data/rp/`). Cards import from Tavern/SillyTavern
+PNG or JSON (V1, V2, V3) and export as PNG (V2 and V3 chunks) or JSON; lorebooks import and export as
+SillyTavern World Info JSON. Ticking several characters starts a group chat.
+
+The host builds the prompt (`prompt.mjs`) in the order of Settings -> Roleplay (main prompt, World Info,
+persona, description, personality, scenario, examples, chat, post-history), with macros, World Info
+(keys, secondary-key logic, regex, constant, chance, delay, recursion, inclusion groups, budget, all
+positions), the author's note, character's note and persona at their depths, names in group chats,
+stop strings at the person's (and other members') names, and the newest messages that fit the window.
+Example dialogues give way first. Sampling, thinking and the output cap come from the RP profile.
+
+In a chat: swipes (‹ n/m ›, past the last version writes a new one), edit, delete, hide from the model,
+branch, Continue, Impersonate (writes your next message into the box), Next speaker and click-a-member
+in groups, the author's note, the chat's lorebooks, and the prompt inspector (search icon). Commands:
+`/continue /impersonate /swipe /talk name`. Not done: SillyTavern's sticky and cooldown timers (kept on
+import and export but not applied), and the extensions (image generation, TTS, vector storage).

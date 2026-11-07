@@ -133,7 +133,7 @@ function CharactersTab() {
       <input ref={file} type="file" multiple accept=".png,.json,image/png,application/json" hidden onChange={e => { void onFiles(e.target.files); e.target.value = ''; }} />
       <Btn variant="primary" icon="plus" onClick={() => setEditing(blankCharacter())}>{tr('New character')}</Btn>
     </div>
-    {picked.length > 1 ? <div className="rp-groupbar"><span className="small">{tr('{0} picked', [picked.length])}</span><Btn variant="primary" size="sm" icon="chat" onClick={() => { newRpChat(picked); setPicked([]); }}>{tr('Start a group chat')}</Btn><Btn size="sm" variant="ghost" onClick={() => setPicked([])}>{tr('Clear')}</Btn></div> : null}
+    {picked.length > 1 ? <div className="rp-groupbar"><span className="small">{tr('{0} picked', [picked.length])}</span><Btn variant="primary" size="sm" icon="chat" onClick={() => { const ids = picked; setPicked([]); setTimeout(() => newRpChat(ids), 0); }}>{tr('Start a group chat')}</Btn><Btn size="sm" variant="ghost" onClick={() => setPicked([])}>{tr('Clear')}</Btn></div> : null}
     {!shown.length ? <div className="rp-empty"><p>{tr(lib?.characters.length ? 'No character matches.' : 'No characters yet. Import a card from SillyTavern, Chub or any Tavern app (PNG or JSON), or write one.')}</p></div> : null}
     <div className="rp-grid">
       {shown.map(c => <div key={c.id} className="rp-card" data-picked={picked.includes(c.id) || undefined}>
