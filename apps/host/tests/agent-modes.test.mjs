@@ -241,3 +241,26 @@ test('MODE the mode survives a restart of the agent process: the chat resumes in
   const now = await rt.gw.rpc('session/projections', { request: { sessionId: session, keys: ['permissions'] } });
   assert.equal(now.values.permissions.currentValue, MODE_PRESETS.bypass.key);
 });
+
+test('two pages on one chat: a page that attaches mid-turn gets the waiting card, and the first page keeps getting frames to the end', { skip }, async t => {
+  const r = await rig(t);
+  const second = [];
+  let attachedAt = -1;
+  const frames = await r.run('m-two-pages', 'SCRIPT:retrywrite two.txt hello', {
+    mode: 'manual',
+    onFrame: f => {
+      if (f.type === 'agent-tool' && f.tool.state === 'proposed' && attachedAt < 0) {
+        attachedAt = 0;
+        // A second window opens the chat while the card waits: it is brought up to date, then the person approves there.
+        r.bridge.attach({ chatId: 'm-two-pages', onFrame: g => second.push(g) });
+        attachedAt = second.length;
+        void r.bridge.approve({ chatId: 'm-two-pages', callId: f.tool.id, decision: 'approve' });
+      }
+    },
+  });
+  assert.ok(second.some(f => f.type === 'agent-tool' && f.tool.state === 'proposed'), 'the second page sees the waiting card in its catch-up');
+  assert.equal(frames.at(-1).type, 'done', 'the first page still gets the end of the turn');
+  assert.equal(second.at(-1).type, 'done', 'the second page gets it too');
+  assert.ok(second.length > attachedAt, 'frames after the catch-up reach the second page');
+  assert.equal(lines(join(r.ws, 'two.txt')), 1);
+});

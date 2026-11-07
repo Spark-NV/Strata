@@ -234,7 +234,8 @@ export class TurnProjector {
   #afterTool() {
     const id = this.running.at(-1);
     const card = id ? this.tools.get(id)?.card : null;
-    if (card) this.#status(toolUpdate('tool', 'tool', card.name, card.args, {}, { args: { tool: card.name, verb: card.verb, target: card.target } }));
+    if (card?.name === 'ask_user_question') this.#status({ phase: 'approval', code: 'waiting-approval', text: 'Waiting for your answer…', args: { tool: card.name } });
+    else if (card) this.#status(toolUpdate('tool', 'tool', card.name, card.args, {}, { args: { tool: card.name, verb: card.verb, target: card.target } }));
     else this.#status({ phase: 'waiting', code: 'model-working', text: 'Working out the next step…' });
   }
 
@@ -341,7 +342,9 @@ export class TurnProjector {
         this.composing.delete(d.callId);
         if (draft && draft.bytes > 0 && !NO_CARD.has(d.name)) out.push(draft.frame({ done: true }));
         this.running.push(d.callId);
-        this.#status(toolUpdate('tool', 'tool', d.name, args, {}, { args: { tool: d.name, verb: card.verb, target: card.target } }));
+        // The agent's own question waits for the person, like an approval card: say so, not "Using a tool".
+        if (d.name === 'ask_user_question') this.#status({ phase: 'approval', code: 'waiting-approval', text: 'Waiting for your answer…', args: { tool: d.name } });
+        else this.#status(toolUpdate('tool', 'tool', d.name, args, {}, { args: { tool: d.name, verb: card.verb, target: card.target } }));
         out.push({ type: 'agent-tool', tool: card });
         break;
       }

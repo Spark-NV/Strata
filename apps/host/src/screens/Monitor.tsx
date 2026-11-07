@@ -18,7 +18,7 @@ import { api } from '../lib/client';
 import { useMoney } from '../lib/money';
 import { useKept } from '../lib/kept-state';
 import type { Hardware, MonitorState, ServeRequest } from '../lib/types';
-import { useNative, nativeRouting, type NativeState } from '../lib/native';
+import { useNative, nativeRouting, type NativeInstance, type NativeState } from '../lib/native';
 import { nativeMonitorData, withHostSensors } from '../lib/native-monitor';
 const number = (value: number | null | undefined, digits = 0) => hasReading(value) ? value.toLocaleString(localeTag(), { maximumFractionDigits: digits, minimumFractionDigits: digits }) : '—';
 const percent = (used: number | null | undefined, total: number | null | undefined) => hasReading(used) && hasReading(total) && total > 0 ? Math.max(0, Math.min(100, used / total * 100)) : null;
@@ -67,7 +67,31 @@ export function MonitorScreen() {
         const timer = setInterval(ask, 10000);
         return () => clearInterval(timer);
     }, []);
-    return <LegacyMonitorScreen native={native?.instances.length ? native : null}/>;
+    const pinned = usePinnedNative(native);
+    return <LegacyMonitorScreen native={native?.instances.length ? native : pinned}/>;
+}
+/**
+ * The pinned model (server/pinned-model.mjs) is a Strata server the app did not start, so it is not one of the native instances, and the
+ * agent's requests reach it through the Harness, past the host's own counters. Its /metrics is the same as an app-started engine's: while
+ * this screen is open it is read every 2 s and shown as one instance, so speed, reading, state and requests show for agent work too.
+ */
+function usePinnedNative(native: NativeState | null): NativeState | null {
+    const pinned = useStore(s => s.pinned);
+    const [metrics, setMetrics] = useState<Record<string, any> | null>(null);
+    const on = !!pinned?.enabled && !native?.instances.length;
+    useEffect(() => {
+        if (!on) { setMetrics(null); return; }
+        let live = true, count = 0;
+        const read = () => { if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+            void api.get<Record<string, any>>(`/api/pinned/metrics${count++ % 10 === 0 ? '?requests=all' : ''}`).then(m => { if (live) setMetrics(m); }, () => { if (live) setMetrics(null); }); };
+        read();
+        const timer = setInterval(read, 2000);
+        return () => { live = false; clearInterval(timer); };
+    }, [on]);
+    if (!on || !metrics) return null;
+    const instance: NativeInstance = { id: 'pinned', apiModelId: pinned?.modelId ?? '', model: pinned?.modelId ?? 'pinned', label: pinned?.name ?? pinned?.modelId ?? 'Model', port: 0, gpus: [], status: 'ready', phase: metrics.live?.state ?? 'idle', loadedAt: '', error: null, context: pinned?.context ?? undefined, metrics };
+    const base = native ?? ({ available: true, repo: '', summary: '', error: null, catalog: null, installed: null, hardware: null, fields: [], jobs: [], capabilities: { updates: false, rollback: false, calibration: false } } as unknown as NativeState);
+    return { ...base, instances: [instance], defaultId: 'pinned' };
 }
 function LegacyMonitorScreen({ native }: {
     native: NativeState | null;

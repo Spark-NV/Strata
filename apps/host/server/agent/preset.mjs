@@ -20,7 +20,11 @@
  *   - The goal, skill, workflow and fork tools are kept (owner decision): the first message is slower, and the short plain system prompt below keeps it as small as it can be.
  */
 
+import { fileURLToPath } from 'node:url';
 import { withoutDisabled } from './tools-catalog.mjs';
+
+/** The Vibe project tools, loaded by path inside the preset like the Harness's own tool plugins. */
+export const VIBE_PLUGIN = fileURLToPath(new URL('./plugins/strata-vibe.mjs', import.meta.url));
 
 /** Plugin ids of the pinned Harness `standard` preset, in its order (the drift check). */
 export const STANDARD_PLUGIN_IDS = [
@@ -70,7 +74,7 @@ export function agentPromptFor(platform = process.platform) {
  * @param {{platform?: string, search?: boolean}} [options]
  * @returns {object} the `config` of the `preset-standard` row
  */
-export function standardPreset({ platform = process.platform, search = false, off = new Set(), skillsDir = null, compaction = [] } = {}) {
+export function standardPreset({ platform = process.platform, search = false, off = new Set(), skillsDir = null, compaction = [], vibe = null } = {}) {
   const windows = platform === 'win32';
   const plugins = [
     { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: agentPromptFor(platform), complete: true, includeRuntimeContext: false } },
@@ -110,6 +114,8 @@ export function standardPreset({ platform = process.platform, search = false, of
     { id: 'tool-todo', name: '@deepseek-ai/dsh-tool-todo', config: { allowParallelInProgress: true } },
     { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { fetch: !off.has('fetch'), search: search && !off.has('search'), searchTimeoutMs: 60000 } },
     { id: 'present', name: '@deepseek-ai/dsh-tool-present' },
+    // Vibe chats' project tools (plugins/strata-vibe.mjs): every agent has them; only a Vibe chat's model is offered them (../profiles.mjs).
+    ...(vibe ? [{ id: 'strata-vibe', name: VIBE_PLUGIN, config: vibe }] : []),
     { id: 'tool-plugin-manager', name: '@deepseek-ai/dsh-plugin-manager/tools', disabled: true },
   ];
   // The groups the person switched off in Settings -> Tools; a web plugin with both halves off is not loaded at all.

@@ -17,9 +17,22 @@ and talks to its Gateway. Nothing here downloads or builds anything.
 | `children.mjs` | pure projection of one helper agent's events into its row and its approval card |
 | `preset.mjs` | the agent preset (which tools the chat has) |
 | `plugins/strata-gate.mjs` | the Manual-mode approval gate (a Harness plugin, loaded by path) |
+| `plugins/strata-vibe.mjs`, `vibe-state.mjs` | Vibe chats: the project book, the stages, checks, reviews, save points and the hand-over (tools `vibe_*`, inside the agent preset) |
 | `plugins/strata-search.mjs`, `plugins/strata-models.mjs` | the app's web search registered with the Harness; helper agents on a named model |
 | `plugins/strata-context.mjs`, `context-budget.mjs`, `context-fit.mjs` | measured context pressure, summaries that fit the window, the check before a message goes out |
 | `agent-bridge.mjs` | the chat-to-session map, turns, approvals, Stop, status |
+
+## Vibe chats
+
+A chat in the Vibe profile runs with the gate asking (the Mode menu does not apply). At the start of each turn the bridge writes which
+folder the chat's Harness session works in (`<data>/vibe/sessions/<session>.json`), lifts a "wait for the person" block (it becomes a
+required rethink) and puts `bookSummary` in front of the message. The gate's `vibeDecision` refuses changes outside the build stage,
+asks only before the work is sent off this computer (push, publish, a remote repository), keeps the book writable only by the tools, records which sessions changed files, refuses a
+second helper writing while another writing helper still works, and makes a save point before every helper starts in the build stage.
+The tools (`strata-vibe.mjs`) hold the rest: a brief must be complete before `vibe_start`; only the brief (medium and large work) gets a card (the hand-over
+merges by itself), git set-up and the person's unsaved changes are handled without one; `vibe_milestone_done` needs a passing `vibe_check` and a passing `vibe_review` from a non-writing helper on the
+same work (`sameWork`: a commit that only changes the book counts as the same). Tests: `tests/vibe.test.mjs` (real git, a pretend
+Harness context).
 
 ## Frames sent on `/api/chat/stream` for an agent turn
 

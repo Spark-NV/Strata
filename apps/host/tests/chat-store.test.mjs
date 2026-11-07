@@ -189,3 +189,21 @@ test('import: only chats the host does not have are taken, the ones it has are l
     assert.equal((await readChat(store, 's_have')).session.title, 'on the host');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a deleted chat stays deleted: a later save of an old copy is refused (410 deleted), an import skips it, and both survive a restart', async () => {
+  const dir = scratch();
+  try {
+    const store = createChatStore({ dir });
+    const a = chat('gone', 2, 10);
+    await store.save('gone', text(a));
+    await store.remove('gone');
+    await assert.rejects(store.save('gone', text(a)), e => e.status === 410 && e.code === 'deleted');
+    assert.deepEqual((await store.importMany([a])).skipped, ['gone']);
+    const again = createChatStore({ dir });
+    await assert.rejects(again.save('gone', text(a)), e => e.status === 410 && e.code === 'deleted');
+    assert.equal(again.list().chats.length, 0);
+    assert.deepEqual(again.list().damaged, [], 'the list of deleted chats is not taken for a damaged chat');
+    await again.save('new-one', text(chat('new-one', 1, 5)));
+    assert.equal(again.list().chats.length, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

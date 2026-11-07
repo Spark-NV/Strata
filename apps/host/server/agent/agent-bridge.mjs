@@ -22,6 +22,8 @@ import { randomUUID } from 'node:crypto';
 import { GatewayClient } from './gateway-client.mjs';
 import { HarnessProcess, resolveHarness, redact, stopStaleAgent } from './harness-runtime.mjs';
 import { StatusReporter } from './status.mjs';
+import { announcesQuestions } from './vibe-nudge.mjs';
+import { bindSession as bindVibeSession, bookSummary, loadBook, loadRun, saveRun, RETHINK_AFTER } from './vibe-state.mjs';
 import { buildProfile, routeFor, MODE_PRESETS, modeOf, effortOf, localOutputBudget, compactionHeadroom } from './profile.mjs';
 import { TurnProjector, parseArguments as parseArgs } from './events.mjs';
 import { ChildProjector } from './children.mjs';
@@ -122,7 +124,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
  * @param {string} [options.nodePath]                   the Node runtime that runs the Harness
  * @param {(line:string)=>void} [options.log]
  */
-export function createAgentBridge({ profilePolicyFile = null, memoryFile = null, bindProfile = () => {}, dataDir, componentsDir = null, bundledDir = null, gate = true, localInstances, connections, tools = () => undefined, defaultLocalId = () => null, skillsDir = () => null, onGoal = () => {}, onPlan = () => {}, onQueue = () => {}, proxyBase = null, searchMock = null, expertSampling = () => null, engineProgress = () => null, engineGraceMs = 30 * 60_000, stallMs = 4 * 60_000, stallToolMs = 20 * 60_000, env = process.env, nodePath = process.execPath, log = () => {}, startTimeoutMs = 120_000, sessionReadyMs = 60_000, sessionRetryMs = 1_500 }) {
+export function createAgentBridge({ profilePolicyFile = null, memoryFile = null, vibeStateDir = null, vibeDefaults = [], bindProfile = () => {}, dataDir, componentsDir = null, bundledDir = null, gate = true, localInstances, connections, tools = () => undefined, defaultLocalId = () => null, skillsDir = () => null, onGoal = () => {}, onPlan = () => {}, onQueue = () => {}, proxyBase = null, searchMock = null, expertSampling = () => null, engineProgress = () => null, engineGraceMs = 30 * 60_000, stallMs = 4 * 60_000, stallToolMs = 20 * 60_000, env = process.env, nodePath = process.execPath, log = () => {}, startTimeoutMs = 120_000, sessionReadyMs = 60_000, sessionRetryMs = 1_500 }) {
   const root = join(dataDir, 'agent');
   const home = join(root, 'home');
   const sessionsFile = join(root, 'sessions.json');
@@ -182,7 +184,7 @@ export function createAgentBridge({ profilePolicyFile = null, memoryFile = null,
   /** The agent's profile now, plus where its shaped routes really lead (read by the forwarding endpoint). */
   let shapeTargets = {};
   function buildProfileNow() {
-    const profile = buildProfile({ local: localInstances(), connections: connections(), gate, tools: tools(), skillsDir: skillsDir(), proxyBase, searchMock, defaultLocalId: defaultLocalId(), policyFile: profilePolicyFile, memoryFile });
+    const profile = buildProfile({ local: localInstances(), connections: connections(), gate, tools: tools(), skillsDir: skillsDir(), proxyBase, searchMock, defaultLocalId: defaultLocalId(), policyFile: profilePolicyFile, memoryFile, vibeStateDir, vibeDefaults });
     shapeTargets = profile.shapeTargets ?? {};
     return profile;
   }
@@ -363,18 +365,35 @@ export function createAgentBridge({ profilePolicyFile = null, memoryFile = null,
     try { return await runTurnInner(c, options); } finally { c.starting = false; }
   }
 
+  /** The Head's message to itself when it announced questions and did not ask them. */
+  const VIBE_ASK_NUDGE = 'You said you would ask the person some questions, but you did not ask them, so they see nothing to answer. Ask them now with the ask_user_question tool: 3 to 5, the most important first, each with likely answers and your recommended one first. Do not repeat your previous message.';
+
+  /** A Vibe turn begins: the gate learns the chat's project folder, the person's new message lifts a "wait for the person" block. */
+  function vibeTurnStart(sessionId, root) {
+    try {
+      bindVibeSession(vibeStateDir, sessionId, root);
+      let run = loadRun(vibeStateDir, root);
+      if (run.needUser) run = saveRun(vibeStateDir, root, { ...run, needUser: false, needRethink: true, failStreak: RETHINK_AFTER });
+      return { summary: bookSummary(root, run, loadBook(root)) };
+    } catch (e) { log(`vibe: ${e.message}`); return { summary: null }; }
+  }
+
   async function runTurnInner(c, { chatId, message, workspacePath, choice = null, mode = null, history = [], onFrame, requestId = `req-${randomUUID()}`, signal, goal = null, thinking = null, thinkingBudget = 0, profile = null, images = [], planTask = null, planRun = null, researchTopic = null }) {
-    let send = onFrame; let attached = true;
+    // Every page showing this chat gets the turn's frames: the one that sent the message and any that attached later (a second window,
+    // a reload). One page taking over used to leave the other showing "working" with no question or approval card.
+    const sinks = new Set([onFrame]);
+    let attached = true;
+    const send = frame => { for (const sink of [...sinks]) { try { sink(frame); } catch { sinks.delete(sink); } } attached = sinks.size > 0; };
     // A research run gathers first; what the assistant writes while gathering is notes, not the answer, so it is not shown.
     let hideDeltas = !!researchTopic;
-    signal?.addEventListener('abort', () => { send = () => {}; attached = false; }, { once: true });
+    signal?.addEventListener('abort', () => { sinks.delete(onFrame); attached = sinks.size > 0; }, { once: true });
     // What the assistant itself wrote in this run (not our own step lines): a plan turn reads its plan from it, a step reads its summary.
     const written = { all: '', step: '', reasoning: '' };
     // The frame that closed the turn, kept with the turn's text for a page that comes back after it ended (attach).
     let terminal = null;
     // The turn guard (turn-guard.mjs): counts failing searches, searches, plan rewrites and a nearly full context. Set up once the route is known.
     let guard = null;
-    const raw = frame => { if (frame.type === 'done' || frame.type === 'error') terminal = frame; try { send(frame); } catch { send = () => {}; attached = false; } };
+    const raw = frame => { if (frame.type === 'done' || frame.type === 'error') terminal = frame; send(frame); };
     // What the turn made (files) and compact activity lines (notes-split-agent8.md): derived from the cards the turn already sends.
     const tracker = new DeliverableTracker(workspacePath, { ...trackerFolders(), claims: folderClaims, owner: chatId });
     let toolsRan = false;   // a turn that ran no tool wrote nothing, so there is nothing to look for at its end
@@ -436,7 +455,9 @@ export function createAgentBridge({ profilePolicyFile = null, memoryFile = null,
 
     // The chat's permission mode is read once, here, for this whole turn. A change the user makes while the
     // turn runs applies to the next one, so a running turn never sees its permissions move under it.
-    const appliedMode = planTask ? 'plan' : modeOf(mode);
+    // A Vibe chat is governed by its project's stage (plugins/strata-gate.mjs), not by the Mode menu: it always runs with the gate asking.
+    const vibe = profile === 'vibe' && vibeStateDir && workspacePath ? vibeTurnStart(sessionId, workspacePath) : null;
+    const appliedMode = planTask ? 'plan' : vibe ? 'manual' : modeOf(mode);
     await applyMode(runtime, sessionId, appliedMode);
 
     // Does the message fit the model's window? Asked before anything is sent, with the model server's own count (context-fit.mjs). A message
@@ -476,15 +497,18 @@ export function createAgentBridge({ profilePolicyFile = null, memoryFile = null,
     /**
      * A page that comes back (a reload, a new window) takes the running turn over again. Everything that was said while no page was there is
      * sent as one catch-up: the start, the text and thinking so far (a `resync`), every tool card as it is now (the ones waiting for a yes
-     * included) and the questions waiting for an answer. After that the turn's frames flow to the new page as they did to the old one.
+     * included) and the questions waiting for an answer. After that the turn's frames flow to the new page as well as to the pages already
+     * showing it.
      */
     turn.reattach = ({ onFrame, signal: again }) => {
-      send = onFrame; attached = true;
-      again?.addEventListener('abort', () => { send = () => {}; attached = false; }, { once: true });
-      raw({ type: 'start', model: route.name, contextMax: route.contextWindow, demo: false, remoteModel: route.kind === 'api', agent: true, mode: appliedMode, sessionId, requestId, skills: [], resumed: true, ...(planTask ? { planning: true } : {}) });
-      raw({ type: 'resync', content: hideDeltas ? '' : written.all, reasoning: written.reasoning });
-      for (const t of projector.tools.values()) if (t.card) raw({ type: 'agent-tool', tool: t.card });
-      for (const q of questions.values()) if (q.sessionId === sessionId) raw({ type: 'agent-question', callId: q.callId, questions: q.items });
+      // The page that attaches is brought up to date on its own; the others keep their stream.
+      const catchUp = frame => { try { onFrame(frame); } catch { /* gone already */ } };
+      catchUp({ type: 'start', model: route.name, contextMax: route.contextWindow, demo: false, remoteModel: route.kind === 'api', agent: true, mode: appliedMode, sessionId, requestId, skills: [], resumed: true, ...(planTask ? { planning: true } : {}) });
+      catchUp({ type: 'resync', content: hideDeltas ? '' : written.all, reasoning: written.reasoning });
+      for (const t of projector.tools.values()) if (t.card) catchUp({ type: 'agent-tool', tool: t.card });
+      for (const q of questions.values()) if (q.sessionId === sessionId) catchUp({ type: 'agent-question', callId: q.callId, questions: q.items });
+      sinks.add(onFrame); attached = true;
+      again?.addEventListener('abort', () => { sinks.delete(onFrame); attached = sinks.size > 0; }, { once: true });
     };
     /**
      * A turn must always end. If the Harness sends nothing at all for a while (a tool that never returns, a model server that went
@@ -657,6 +681,7 @@ ${note.text}`, key: note.key, values: note.values, noteReason: 'cut' });
           turn.parentOpen = true;
           if (turn.research) turn.research.waitingStart = false;
           turn.cutWaiting = false;
+          turn.vibeNudgeWaiting = false;
           clearTimeout(turn.settleTimer);
           // After Stop, a helper's report would start a new turn that nobody asked for.
           if (turn.stopping) void runtime.gw.rpc('session/cancel', { request: { sessionId } }).catch(() => {});
@@ -841,6 +866,20 @@ ${note.text}
               return;
             }
           }
+          // Vibe: the Head said it would ask the person something but ended without asking (no question card, no question in its
+          // words), so the person would see nothing to answer. It is sent back once to ask with the question tool.
+          if (vibe && !turn.goalRun && !turn.stopping && projector.ended?.kind === 'completed') {
+            if (turn.vibeNudgeWaiting) { turn.settleTimer = after(300, armSettle); return; }
+            const asked = [...projector.tools.values()].some(x => ['ask_user_question', 'vibe_start', 'vibe_finish'].includes(x.card?.name));
+            if (!asked && (turn.vibeNudges ?? 0) < 1 && announcesQuestions(written.all)) {
+              turn.vibeNudges = (turn.vibeNudges ?? 0) + 1;
+              turn.vibeNudgeWaiting = true;
+              try { await runtime.gw.rpc('session/prompt', { request: { requestId: `vibe-ask-${randomUUID()}`, sessionId, mode: 'queue', content: [{ type: 'text', text: VIBE_ASK_NUDGE }] } }); }
+              catch { turn.vibeNudgeWaiting = false; finishTurn(null); return; }
+              turn.settleTimer = after(500, armSettle);
+              return;
+            }
+          }
           // A plan step's goal is complete: record it, deliver queued messages, start the next step.
           if (turn.plan && current && current.phase === 'complete' && !turn.advancing) {
             turn.advancing = true;
@@ -901,6 +940,8 @@ ${note.text}
     } else {
       let prompt = message;
       if (fresh && history.length) prompt = withEarlierConversation(history, message);
+      // The project book in front of every message of a Vibe chat: the goal, the stage, the decisions survive any summary or restart.
+      if (vibe?.summary) prompt = `${vibe.summary}\n\n${prompt}`;
       try {
         await runtime.gw.rpc('session/prompt', { request: { requestId, sessionId, mode: 'queue', content: [{ type: 'text', text: prompt }, ...imageParts(images)] } });
       } catch (e) {
@@ -1186,6 +1227,8 @@ ${note.text}
     const outcome = skip ? 'next' : buildAnswer(entry.items, answers);
     await rt.gw.answerEvent({ clientId: entry.clientId ?? rt.clientId, eventId: entry.eventId, outcome });
     questions.delete(key);
+    // Every other page showing this chat takes its copy of the question card away too.
+    chats.get(chatId)?.turn?.announceQuestion?.({ type: 'agent-question-end', callId });
     return { ok: true, skipped: !!skip };
   }
 

@@ -6,6 +6,7 @@ import { askQuestion, askSub, askIcon } from '../lib/ask';
 import { resolveTool, useStore } from '../lib/store';
 import { pendingApprovals } from '../lib/approvals';
 import { QuestionCard } from './QuestionCard';
+import { openVibeInbox } from './VibeInbox';
 import type { AgentAsk } from '../lib/agent-ask';
 import type { ToolCall } from '../lib/types';
 
@@ -29,7 +30,7 @@ export function ApprovalCard({ messageId, tool: t }: {
     if (t.ask)
         return <section className="askcard" data-state={t.state} aria-label={tr(askQuestion(t.ask))}>
       <div className="askcard__top"><span className="askcard__icon"><Icon name={askIcon(t.ask)} size={18}/></span>
-        <div className="askcard__text"><p className="askcard__q">{askQuestion(t.ask)}</p>{askSub(t.ask) ? <p className="askcard__why" title={askSub(t.ask)}>{askSub(t.ask)}</p> : null}</div>
+        <div className="askcard__text"><p className="askcard__q">{askQuestion(t.ask)}</p>{askSub(t.ask) ? <p className="askcard__why" data-full={t.ask?.id === 'vibe-start' || undefined} title={askSub(t.ask)}>{askSub(t.ask)}</p> : null}</div>
         <div className="askcard__acts"><Btn size="sm" onClick={() => resolveTool(messageId, t.id, false)}>{tr("Deny")}</Btn><Btn variant="primary" size="sm" onClick={() => resolveTool(messageId, t.id, true)}>{tr("Approve")}</Btn></div></div>
       <details className="askcard__details"><summary><Icon name="chevron" size={11}/>{tr("Details")}</summary><pre>{t.preview}</pre></details>
     </section>;
@@ -56,6 +57,9 @@ export function ApprovalDock({ sessionId }: {
     const asks = useStore(s => (sessionId ? s.agentAsks[sessionId] : undefined)) ?? NO_ASKS;
     if (!items.length && !asks.length)
         return null;
+    // A Vibe chat reads what the Head is waiting for in its answer panel, with room and formatting: here only the way there.
+    if (session?.profile === 'vibe')
+        return <section className="approvaldock approvaldock--vibe" role="group" aria-label={tr("Waiting for your answer")}><button type="button" className="vibe-dock-line" onClick={openVibeInbox}><Icon name="chat" size={16}/>{tr("The Head is waiting for your answer. Open it")}<Icon name="chevron" size={13}/></button></section>;
     return <section className="approvaldock" role="group" aria-label={tr("Waiting for your answer")} data-count={items.length}>
       {asks.map(a => <QuestionCard key={a.callId} sessionId={sessionId!} ask={a}/>)}
       {items.map(({ messageId, tool }) => <ApprovalCard key={tool.id} messageId={messageId} tool={tool}/>)}

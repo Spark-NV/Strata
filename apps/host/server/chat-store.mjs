@@ -4,6 +4,8 @@
  *   <data folder>/chats/index.json         { v: 1, chats: [{ id, rev, createdAt, updatedAt, bytes, title }] }
  *   <data folder>/chats/<id>.json          { "v": 1, "rev": N, "savedAt": ISO, "session": { ...the chat exactly as the page sent it... } }
  *   <data folder>/chats/conflicts/         the version a later save displaced when two windows saved the same chat from an older copy
+ *   <data folder>/chats/index.deleted.json { v: 1, deleted: { <id>: ISO } }: chats the person deleted. A save of one of them is refused
+ *                                          (410, code `deleted`), so a window that still holds an old copy cannot bring it back.
  *
  * - One file per chat. A save writes a temporary file next to it, flushes it and renames it over the chat: a crash or a full disk
  *   in the middle leaves the older file whole. Temporary files left by a crash are removed at the next start.
@@ -56,6 +58,10 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
   let tmpCount = 0;
   let index = new Map();   // id -> entry
   const damaged = new Set();
+  // Deleted chats: an id is never reused (new chats get new random ids), so a save of one of these is an old copy coming back.
+  const deletedFile = join(root, 'index.deleted.json');
+  let deleted = {};
+  try { const parsed = JSON.parse(readFileSync(deletedFile, 'utf8')); if (parsed?.deleted && typeof parsed.deleted === 'object') deleted = parsed.deleted; } catch { /* none yet */ }
 
   const fileOf = id => join(root, `${id}.json`);
   const bytesOf = text => Buffer.byteLength(text, 'utf8');
@@ -127,6 +133,7 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
       return { v: CHAT_FORMAT, chats, damaged: [...damaged] };
     },
     has: id => index.has(id),
+    wasDeleted: id => Object.hasOwn(deleted, id),
     rev: id => index.get(id)?.rev ?? 0,
     /** The stored file text of a chat ({"v","rev","savedAt","session"}), or null. */
     async read(id) {
@@ -144,6 +151,7 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
       try { session = JSON.parse(sessionText); } catch { return Promise.reject(new ChatStoreError('The chat must be JSON.', 400, 'bad-json')); }
       if (!session || typeof session !== 'object' || Array.isArray(session) || session.id !== id) return Promise.reject(new ChatStoreError('The chat does not match its id.', 400, 'bad-chat'));
       const body = sessionText.trim();
+      if (Object.hasOwn(deleted, id)) return Promise.reject(new ChatStoreError('This chat was deleted.', 410, 'deleted'));
       return queue(async () => {
         const current = index.get(id);
         const rev = (current?.rev ?? 0) + 1;
@@ -164,6 +172,8 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
       return queue(async () => {
         try { await io.unlink(fileOf(id)); } catch (e) { if (e?.code !== 'ENOENT') throw storeFailure(e); }
         const had = index.delete(id);
+        deleted = { ...deleted, [id]: now().toISOString() };
+        try { await writeAtomic(deletedFile, JSON.stringify({ v: CHAT_FORMAT, deleted })); } catch (e) { throw storeFailure(e); }
         await writeIndex();
         return { id, removed: had };
       });
@@ -174,7 +184,7 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
       for (const session of Array.isArray(sessions) ? sessions : []) {
         const id = session?.id;
         if (!validChatId(id)) { failed.push({ id: String(id ?? ''), error: 'not a chat id' }); continue; }
-        if (index.has(id)) { skipped.push(id); continue; }
+        if (index.has(id) || Object.hasOwn(deleted, id)) { skipped.push(id); continue; }
         try { await this.save(id, JSON.stringify(session)); imported.push(id); }
         catch (e) { failed.push({ id, error: e.message, code: e.code }); if (e.code === 'disk-full') break; }
       }

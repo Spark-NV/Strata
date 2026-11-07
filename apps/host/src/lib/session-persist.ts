@@ -167,6 +167,8 @@ export interface SessionWriterOptions {
   onSerialize?: (session: Session) => void;
   /** Called after every pass, with what was saved and which chats the host did not take. */
   onResult?: (result: SaveResult) => void;
+  /** The host refused a chat because the person deleted it (an old copy held by this page): the page drops it instead of trying again. */
+  onDeleted?: (id: string) => void;
   /** The chats the host already has: [id, rev]. Only these (and chats this writer saved) are ever removed from it. */
   known?: Iterable<[string, number]>;
   /** Start saving at once. The page leaves it off until the host's chats have been read. */
@@ -227,6 +229,12 @@ export function createSessionWriter(options: SessionWriterOptions) {
         revs.set(s.id, saved.rev); known.add(s.id); sent.set(s.id, text); failedIds.delete(s.id);
         written++;
       } catch (error) {
+        // Deleted by the person (in this window earlier, or another): never saved again, and the page lets go of its copy.
+        if (error instanceof TransportError && error.status === 410 && error.code === 'deleted') {
+          sent.set(s.id, text); failedIds.delete(s.id); known.delete(s.id); revs.delete(s.id);
+          options.onDeleted?.(s.id);
+          continue;
+        }
         // The host keeps the last good file of this chat; the chat stays whole in memory and is tried again.
         failedIds.add(s.id);
         failed.push({ id: s.id, reason: failureReason(error), message: error instanceof Error ? error.message : String(error) });

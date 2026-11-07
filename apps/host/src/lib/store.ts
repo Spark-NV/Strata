@@ -410,7 +410,7 @@ function applyPinned(pinned: PinnedModelState) {
 }
 /** The profile a chat is in (a chat from before profiles is a Chat). */
 export function profileOf(session: Session | undefined | null): ChatProfileId {
-  return session?.profile === 'code' || session?.profile === 'rp' ? session.profile : 'chat';
+  return session?.profile === 'code' || session?.profile === 'rp' || session?.profile === 'vibe' ? session.profile : 'chat';
 }
 export async function saveProfile(profile: ChatProfile) {
   const saved = await api.put<{ profile: ChatProfile }>(`/api/profiles/${profile.id}`, profile);
@@ -1283,6 +1283,12 @@ let saveToast: string | null = null;
 
 const sessionWriter = createSessionWriter({
   transport: chatTransport,
+  // A chat the person deleted that this page still held (a window that missed the deletion, a copy saved as the page closed): let it go.
+  onDeleted: id => {
+    if (!state.sessions.some(s => s.id === id)) return;
+    sessionWriter.forget(id);
+    set({ sessions: state.sessions.filter(s => s.id !== id), ...(state.activeSession === id ? { activeSession: null } : {}) });
+  },
   enabled: false,   // on once the host's chats have been read (loadChatsFromHost), so an older copy here never replaces a newer file
   // Nothing is trimmed to fit (#5192). A chat the host cannot write keeps its last file and stays whole here; it is reported and
   // tried again. A host that does not answer is retried quietly: that is the app being down, not a full disk.

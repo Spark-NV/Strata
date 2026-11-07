@@ -22,9 +22,10 @@
  * start (a Manual chat with no gate would be a chat with the sandbox open and nobody asking).
  */
 import { policyReader, skillAllowed, toolAllowed } from '../../profiles.mjs';
+import { BOOK_DIR, checkpoint, inside, loadRun, rootOfSession, saveRun } from '../vibe-state.mjs';
 
 export const name = 'strata-gate';
-export const inject = ['approval', 'permissionPresets', 'sessions', 'tools'];
+export const inject = ['approval', 'permissionPresets', 'sessions', 'sessionProjections', 'tools'];
 
 /** Preset key the host writes for Manual (apps/host/server/agent/profile.mjs MODE_PRESETS). */
 export const MANUAL_PRESET = 'strata-manual';
@@ -377,6 +378,70 @@ export function planDecision(exec) {
 }
 
 /**
+ * Vibe chats (plugins/strata-vibe.mjs, ../vibe-state.mjs) are governed by their stage, not by the Mode menu:
+ *   - discover (and done): look and research only. A change to the project is refused with a sentence the model reads.
+ *   - build: everything runs without a question (installing, sudo, any tool), except sending the work off this computer (pushing,
+ *     publishing, a remote repository), which asks. The project book is written only by the vibe tools.
+ *     After repeated failed checks, changes wait for a recorded rethink, or for the person.
+ * Returns null (allowed, no question), {kind:'deny'} or {kind:'ask'}; `changes` says whether the call can change files.
+ */
+/** The one kind of step a Vibe build still asks about: sending the work off this computer (pushing, publishing, a remote repository). */
+const ALWAYS_ASK_SHELL = /\bgit\s+(?:push|remote\s+(?:add|set-url))\b|\bgh\s+(?:repo\s+(?:create|delete|edit|rename|archive)|release\s+create|pr\s+(?:create|merge)|secret\s+set)\b|\b(?:npm|pnpm|yarn|bun)\s+publish\b|\bcargo\s+publish\b|\btwine\s+upload\b|\bpoetry\s+publish\b|\bdocker\s+push\b/i;
+/**
+ * A chain of look-only commands while a Vibe project is being planned: `a; b && c || echo x`, with output sent to /dev/null, where every
+ * part is read-only on its own (isReadOnlyShell), an `echo` with no redirection, or `which` / `command -v` / `<tool> --version`.
+ * Quote-aware: a ; or & inside quotes does not split. Anything not understood is not read-only.
+ */
+export function isReadOnlyChain(command) {
+  const text = String(command ?? '').trim();
+  if (!text || text.length > 1200 || /[`\n\r]|\$\(/.test(text)) return false;
+  const parts = [];
+  let cur = '', quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) { cur += c; if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'") { quote = c; cur += c; continue; }
+    if (c === ';') { parts.push(cur); cur = ''; continue; }
+    if ((c === '&' || c === '|') && text[i + 1] === c) { parts.push(cur); cur = ''; i++; continue; }
+    cur += c;
+  }
+  if (quote) return false;
+  parts.push(cur);
+  return parts.every(raw => {
+    const part = raw.replace(/(?:^|\s)(?:[12&]?>\s*\/dev\/null|2>&1)(?=\s|$)/g, ' ').trim();
+    if (!part) return false;
+    if (/^echo(\s+("[^"$`]*"|'[^']*'|[^\s<>|&;$`]+))*$/.test(part)) return true;
+    if (/^(which|command\s+-v|type)\s+[\w.+-]+(\s+[\w.+-]+)*$/.test(part)) return true;
+    if (/^[\w.+-]+\s+(--version|-V|-v|version)$/.test(part) && !/^(rm|mv|cp|dd|mkfs)\b/.test(part)) return true;
+    return isReadOnlyShell(part);
+  });
+}
+
+const VIBE_DISCOVER_REFUSAL = 'Vibe mode: nothing in the project changes before the brief is approved. Look, research and ask now; write the brief with vibe_brief and start the work with vibe_start (a small task starts without an approval card).';
+export function vibeDecision(exec, run, { root = null, inBook = () => false, outside = () => false } = {}) {
+  const tool = String(exec.name ?? '');
+  const args = exec.arguments && typeof exec.arguments === 'object' ? exec.arguments : {};
+  if (tool.startsWith('vibe_') || WEB_TOOLS.has(tool) || READ_ONLY_TOOLS.has(tool)) return null;
+  if (tool.startsWith(LOOK_ONLY_SERVER) || tool.startsWith(MEMORY_SERVER)) return null;
+  if (tool.startsWith(BROWSER_SERVER)) return null;
+  const path = args.file_path ?? args.path;
+  const fileWrite = tool === 'write' || tool === 'edit';
+  const shell = SHELL_TOOLS.has(tool);
+  const stage = run?.stage ?? 'discover';
+  const readOnly = shell && (isReadOnlyShell(args.command) || (stage !== 'build' && isReadOnlyChain(args.command)));
+  const changes = fileWrite || (shell && !readOnly) || tool.startsWith('mcp__');
+  if (!changes) return null;
+  if (stage !== 'build') return { kind: 'deny', reason: VIBE_DISCOVER_REFUSAL };
+  if (run.needUser) return { kind: 'deny', reason: 'Vibe mode: the checks failed too often in a row. Explain the problem to the person and ask how to go on; nothing changes until they answer.' };
+  if (run.needRethink) return { kind: 'deny', reason: 'Vibe mode: the checks failed several times in a row with the same kind of fix. Record a different approach with vibe_decide (kind "rethink") first, then change files again.' };
+  if (fileWrite && path && inBook(path)) return { kind: 'deny', reason: 'The project book (.strata/project) is written only through the vibe tools (vibe_brief, vibe_decide, vibe_note).' };
+  if (shell && ALWAYS_ASK_SHELL.test(String(args.command ?? ''))) return { kind: 'ask', reason: `Send the work off this computer: ${clip(args.description || args.command, 200)}`, changes: true };
+  // `edits`: the call changes project files itself (write / edit). Running a command (tests, a build, an install) does not make a session
+  // one of the builders: a reviewer runs the tests too.
+  return { kind: 'allow', changes: true, edits: fileWrite };
+}
+
+/**
  * @param {object} ctx
  * @param {{web?: {provider?: string, skipAsk?: boolean}}} [config] `web.provider`: the search service's name for the question;
  *        `web.skipAsk`: the person's switch in Settings -> Tools, "search the web without asking" (off unless they turned it on)
@@ -420,6 +485,41 @@ export function apply(ctx, config = {}) {
     return ctx.permissionPresets.current(session);
   };
 
+  /** Is a session's turn still running (a helper that has not reported back)? Unknown counts as not running. */
+  const running = id => {
+    try { const s = ctx.sessions.get(id); const b = s && ctx.sessionProjections.stateOf(s, 'turnBoundary'); return !!b && b.openTurnStartSeq !== null && b.openTurnStartSeq !== undefined; } catch { return false; }
+  };
+  /**
+   * A Vibe chat's call: the stage rules (vibeDecision), the save point before a builder starts, which sessions edited files (a reviewer
+   * must not be one of them), and one writer at a time: a helper may not edit files while another helper that edited files is still working.
+   * Returns 'allow', null (no rule: the normal path) or a decision.
+   */
+  function vibeTurn(exec, agent) {
+    const stateDir = config.vibe.stateDir;
+    const top = chatOf(agent.session);
+    const root = rootOfSession(stateDir, top);
+    if (!root) return String(exec.name ?? '').startsWith('vibe_') ? 'allow' : vibeDecision(exec, null);
+    const run = loadRun(stateDir, root);
+    const decision = vibeDecision(exec, run, { root, inBook: p => inside(`${root}/${BOOK_DIR}`, p), outside: p => !inside(root, p) });
+    const tool = String(exec.name ?? '');
+    const helper = agent.session.header?.origin === 'subagent';
+    if (run.stage === 'build' && !helper && (tool === 'subagent' || tool === 'subagent_fork')) {
+      const args = exec.arguments && typeof exec.arguments === 'object' ? exec.arguments : {};
+      try { checkpoint(root, `Save point before a helper starts: ${String(args.description ?? args.task ?? args.prompt ?? '').replace(/\s+/g, ' ').slice(0, 120)}`); } catch { /* a save point that fails never blocks the work */ }
+    }
+    if (!decision) return 'allow';
+    if (decision.kind === 'deny') return decision;
+    if (decision.edits && run.stage === 'build') {
+      const me = agent.session.id;
+      const holder = run.lease?.session;
+      if (holder && holder !== me && running(holder) && (helper || ctx.sessions.get(holder)?.header?.origin === 'subagent')) {
+        return { kind: 'deny', reason: 'Another helper is changing files in this project right now. One builder at a time: wait until it reports back, or send this work to it with send_message.' };
+      }
+      if (!run.writers.includes(me) || holder !== me) saveRun(stateDir, root, { ...run, writers: run.writers.includes(me) ? run.writers : [...run.writers, me].slice(-50), lease: { session: me, at: new Date().toISOString() } });
+    }
+    return decision.kind === 'allow' ? 'allow' : decision;
+  }
+
   // The chat's profile (Chat, Code, RP) decides which tools and skills exist for it at all, in every mode: a tool or skill outside it is
   // refused here even when the model names it anyway (the forwarding endpoint already leaves them out of what the model is offered).
   const profileOf = config.policyFile ? policyReader(config.policyFile) : () => null;
@@ -431,6 +531,19 @@ export function apply(ctx, config = {}) {
       const args = exec.arguments && typeof exec.arguments === 'object' ? exec.arguments : {};
       if (!toolAllowed(profile, exec.name)) return { kind: 'deny', reason: `The ${profile.name} profile does not allow the ${exec.name} tool. Go on without it and say so if it matters.` };
       if (exec.name === 'skill' && !skillAllowed(profile, args.name)) return { kind: 'deny', reason: `The ${profile.name} profile does not allow the skill "${args.name}". Go on without it.` };
+    }
+    if (profile?.id === 'vibe' && config.vibe?.stateDir) {
+      const vibe = vibeTurn(exec, agent);
+      if (vibe === 'allow') return next();
+      if (vibe) {
+        if (vibe.kind === 'deny') return vibe;
+        // ask: the same single card as Manual (a helper's policy must be `ask` for it to reach the person)
+        if (agent.session.header?.origin === 'subagent' && ctx.approval.overrideOf(agent.session) !== 'ask') agent.session.append('approval/policy', { policy: 'ask' });
+        const downstream = await next();
+        if (downstream.kind !== 'allow') return downstream;
+        return { kind: 'ask', reason: vibe.reason, displayReason: { en: vibe.reason } };
+      }
+      return next();
     }
     if (exec.name === 'run_code') return next();
     // Fail closed (T4): a session whose preset cannot be read (a reset in progress, a helper whose chat is gone) is treated as Manual, so

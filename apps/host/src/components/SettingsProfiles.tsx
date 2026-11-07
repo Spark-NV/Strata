@@ -12,7 +12,7 @@ import { pushToast, resetProfile, saveProfile, useStore } from '../lib/store';
 import type { ChatProfile, ChatProfileId, ProfileSampling } from '../lib/types';
 import { Btn, ErrorNotice, Field, Select } from './ui';
 
-const PROFILE_TABS: { id: ChatProfileId; label: string }[] = [{ id: 'chat', label: 'Chat' }, { id: 'code', label: 'Code' }, { id: 'rp', label: 'RP' }];
+const PROFILE_TABS: { id: ChatProfileId; label: string }[] = [{ id: 'chat', label: 'Chat' }, { id: 'code', label: 'Code' }, { id: 'vibe', label: 'Vibe' }, { id: 'rp', label: 'RP' }];
 const AREAS = [{ id: 'computer', title: 'On this computer' }, { id: 'web', title: 'On the web' }, { id: 'together', title: 'Working on bigger jobs' }];
 const SAMPLING: { key: keyof ProfileSampling; label: string; hint: string; step: number; min: number; max: number }[] = [
   { key: 'temperature', label: 'Temperature', hint: 'Higher is more varied, lower is more focused. Empty: the model card’s value (1.0 while thinking).', step: 0.05, min: 0, max: 2 },

@@ -43,6 +43,10 @@ import { composeQuoted, parseQuoted, type Quote } from '../lib/quotes';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Markdown } from '../components/Markdown';
 import { RpBar, RpEmpty, RpMessage } from '../components/RpChat';
+import { VibeBar } from '../components/VibeBar';
+import { VibeStart, pickVibeFolder } from '../components/VibeStart';
+import { useChatFolder } from '../lib/chat-folder';
+import { OPEN_VIBE_INBOX, VibeInbox, useVibeWaiting } from '../components/VibeInbox';
 import { RpEditor } from '../components/RpEditor';
 import '../lib/rp';
 import { Btn, Icon, IconBtn, ErrorNotice, type IconName } from '../components/ui';
@@ -171,12 +175,25 @@ export function ChatScreen() {
     useEffect(() => { if (planRunId && planTabId && !session?.closedPreviews?.includes(planTabId)) setSelectedPreview(planTabId); }, [planRunId]);
     // The chat shows every run of this chat (a running one has no files yet, so no tab); the sidebar tabs only those with something to compare.
     const allTimeSkipRuns = session?.timeSkips ?? [];
-    const extraTabs = [...runTabs, ...planTab];
+    // Vibe: the answer panel (components/VibeInbox.tsx), opened from the bar's "Needs your answer" or the line above the message box.
+    const vibe = session?.profile === 'vibe';
+    const vibeFolder = useChatFolder(vibe ? session?.id : null);
+    const vibeWaiting = useVibeWaiting(vibe ? session : null).count;
+    const vibeTabId = session ? `vibe:${session.id}` : '';
+    const vibeShown = vibe && selectedPreview === vibeTabId;
+    const vibeTab = vibe && (vibeWaiting > 0 || vibeShown) ? [{ id: vibeTabId, title: 'Needs your answer', icon: 'chat' as const, controls: 'vibe-content' }] : [];
+    useEffect(() => {
+        if (!vibe) return;
+        const open = () => setSelectedPreview(vibeTabId);
+        window.addEventListener(OPEN_VIBE_INBOX, open);
+        return () => window.removeEventListener(OPEN_VIBE_INBOX, open);
+    }, [vibe, vibeTabId]);
+    const extraTabs = [...runTabs, ...planTab, ...vibeTab];
     const selectedRun = timeSkipRuns.find(run => timeSkipTabId(run.id) === selectedPreview);
-    const inlinePreview = splitWidth >= (selectedRun || planShown ? 760 : 1120);
+    const inlinePreview = splitWidth >= (selectedRun || planShown || vibeShown ? 760 : 1120);
     const paneWidth = previewWidth(splitWidth, previewFraction);
     const splitStyle = inlinePreview && selectedPreview && !expanded ? { gridTemplateColumns: `minmax(0,1fr) ${paneWidth}px` } : undefined;
-    const resizeHandle = !setupVisible && inlinePreview && selectedPreview && !expanded ? <PreviewResizeHandle container={splitRef} total={splitWidth} fraction={previewFraction} onChange={setPreviewFraction} controls={selectedRun ? 'time-skip-content' : planShown ? 'plan-content' : 'artifact-content'}/> : null;
+    const resizeHandle = !setupVisible && inlinePreview && selectedPreview && !expanded ? <PreviewResizeHandle container={splitRef} total={splitWidth} fraction={previewFraction} onChange={setPreviewFraction} controls={selectedRun ? 'time-skip-content' : planShown ? 'plan-content' : vibeShown ? 'vibe-content' : 'artifact-content'}/> : null;
     const runCount = timeSkipRuns.length;
     const previewCount = session?.messages.reduce((n, m) => n + (m.artifacts?.length ?? 0), 0) ?? 0;
     useEffect(() => { const items = [...new Map((session?.messages.flatMap(m => m.artifacts ?? []) ?? []).map(a => [a.id, a])).values()]; setPreviews(items.filter(a => !session?.closedPreviews?.includes(a.id))); setSelectedPreview(session && previewsDeferred(session.id) || session?.closedPreviews?.includes(session.previewOpen ?? '') ? null : session?.previewOpen?.startsWith('time-skip:') && !timeSkipRuns.some(r => timeSkipTabId(r.id) === session.previewOpen) ? null : session?.previewOpen ?? null); }, [session?.id]);
@@ -452,6 +469,12 @@ export function ChatScreen() {
         const text = draft.trim();
         if (!text && !queuedPhotos.length)
             return;
+        // Vibe needs its project folder before the first word: the folder dialog opens, and the message stays in the box.
+        if (session?.profile === 'vibe' && !vibeFolder) {
+            pushToast('info', tr('First, pick a project folder'), tr('Vibe works in one folder per project. Choose one, then send your message.'));
+            void pickVibeFolder(session.id);
+            return;
+        }
         if (streaming) {
             // Typed while a goal runs: it waits in the queue, shown under the conversation. With no goal running there is nothing to queue behind.
             if (!text || !session)
@@ -536,8 +559,9 @@ export function ChatScreen() {
 
             <div className="chat__inner">
               {session.rp ? <RpBar session={session}/> : null}
+              {session.profile === 'vibe' && (vibeFolder || session.messages.length) ? <VibeBar session={session} onPreview={openPreview}/> : null}
               {session.rp ? session.messages.map((m, i) => <RpMessage key={m.id} m={m} session={session} isLast={i === session.messages.length - 1}/>) : session.profile === 'rp' && session.messages.length === 0 ? <RpEmpty/> : tr(session.messages.length === 0 ? (session.statsAvailable === false ? <p className="small muted">{tr("Editing from an earlier message. Update the prompt below.")}</p> :
-            <UsageDashboard loaded={!!loaded} session={session}/>) : (session.messages.map((m, i) => (<Message key={m.id} message={m} isLast={i === session.messages.length - 1} onEditPrompt={messageHandlers.onEditPrompt} onPreview={messageHandlers.onPreview} onClosePreview={messageHandlers.onClosePreview} onOpenTimeSkip={messageHandlers.onOpenTimeSkip} timeSkipDone={!!allTimeSkipRuns.find(r => r.id === m.timeSkipId)?.completedAt} timeSkipReal={!!allTimeSkipRuns.find(r => r.id === m.timeSkipId)?.job} timeSkipRun={allTimeSkipRuns.find(r => r.id === m.timeSkipId)} onOpenLink={messageHandlers.onOpenLink}/>))))}
+            session.profile === 'vibe' && !vibeFolder ? <VibeStart session={session}/> : <UsageDashboard loaded={!!loaded} session={session}/>) : (session.messages.map((m, i) => (<Message key={m.id} message={m} isLast={i === session.messages.length - 1} onEditPrompt={messageHandlers.onEditPrompt} onPreview={messageHandlers.onPreview} onClosePreview={messageHandlers.onClosePreview} onOpenTimeSkip={messageHandlers.onOpenTimeSkip} timeSkipDone={!!allTimeSkipRuns.find(r => r.id === m.timeSkipId)?.completedAt} timeSkipReal={!!allTimeSkipRuns.find(r => r.id === m.timeSkipId)?.job} timeSkipRun={allTimeSkipRuns.find(r => r.id === m.timeSkipId)} onOpenLink={messageHandlers.onOpenLink}/>))))}
               <QueuedMessages chatId={session.id}/>
             </div>
           </div>
@@ -547,7 +571,8 @@ export function ChatScreen() {
         </DropZone>
         {tr(!setupVisible && selectedRun && session ? <TimeSkipPanel key={selectedRun.id} run={selectedRun} sessionId={session.id} inline={inlinePreview} expanded={expanded} onCompare={setExpanded} onPreview={openPreview} onClose={() => { setSelectedPreview(null); setExpanded(false); }}/> : null)}
         {tr(!setupVisible && planShown ? <PlanPanel chatId={session?.id}/> : null)}
-        <ArtifactPanel items={previews} onCloseTab={closeTab} selected={setupVisible || planShown ? null : selectedPreview} onSelect={selectPreview} onClose={() => setSelectedPreview(null)} inline={inlinePreview}/>
+        {!setupVisible && vibeShown && session ? <VibeInbox session={session} onClose={() => setSelectedPreview(null)}/> : null}
+        <ArtifactPanel items={previews} onCloseTab={closeTab} selected={setupVisible || planShown || vibeShown ? null : selectedPreview} onSelect={selectPreview} onClose={() => setSelectedPreview(null)} inline={inlinePreview}/>
         {tr(resizeHandle)}
       </div>
     </>);

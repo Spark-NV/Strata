@@ -365,3 +365,19 @@ test('a streamed answer of 1,500 tokens is a handful of saves to the host, the f
     assert.equal([...memory.keys()].filter((k) => k.startsWith('strata.session')).length, 0, 'nothing is written to the browser storage any more');
   } finally { fake.restore(); h.done(); }
 });
+
+test('a page that still holds a chat the person deleted lets go of it instead of saving it back', async () => {
+  const h = host();
+  try {
+    const a = chat('kept', 2, 10), b = chat('deleted', 2, 10);
+    await saveAll(h, [a, b]);
+    await h.store.remove('deleted');   // deleted in another window
+    const dropped = [];
+    const w = writerOn(h, { onDeleted: id => dropped.push(id) });
+    w.schedule([a, { ...b, title: 'edited here' }]);
+    const result = await w.flush();
+    assert.deepEqual(dropped, ['deleted']);
+    assert.equal(result.ok, true, 'not a failure to retry');
+    assert.deepEqual(h.reopen().list().chats.map(c => c.id), ['kept']);
+  } finally { h.done(); }
+});

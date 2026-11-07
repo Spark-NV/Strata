@@ -7695,3 +7695,45 @@ html[data-motion='reduced'] .native-progress__bar[data-indeterminate] > i { anim
 .projects__name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .projects__meta { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-home:has(.projects) .usage-card { width: min(720px, 100%); max-width: 720px; }
+
+/* Vibe chats: the project's stage, milestones and book (components/VibeBar.tsx) */
+.vibe-bar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; margin-bottom: 14px; border: 1px solid var(--st-line); border-radius: var(--st-r-lg); background: var(--st-surface); }
+.vibe-bar--intro { justify-content: flex-start; gap: 10px; }
+.vibe-bar__main, .vibe-bar__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.vibe-bar__stage { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: var(--st-r-pill); border: 1px solid var(--st-line); font-size: 12px; font-weight: 600; }
+.vibe-bar[data-stage="build"] .vibe-bar__stage { border-color: var(--st-accent); }
+.vibe-bar__name { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vibe-bar__ms { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.vibe-bar__dots { display: inline-flex; gap: 4px; }
+.vibe-bar__dots i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--st-line); }
+.vibe-bar__dots i[data-done] { background: var(--st-accent); border-color: var(--st-accent); }
+.vibe-bar__dots i[data-current] { border-color: var(--st-accent); }
+.vibe-bar__check { padding: 1px 8px; border-radius: var(--st-r-pill); background: var(--st-danger-tint); color: var(--st-danger-text); }
+.vibe-bar__check[data-ok] { background: var(--st-ok-tint, var(--st-accent-tint)); color: var(--st-ok-text, var(--st-accent-text)); }
+.vibe-bar__blocked { padding: 1px 8px; border-radius: var(--st-r-pill); background: var(--st-warn-tint); color: var(--st-warn-text); }
+.vibe-bar__branch { display: inline-flex; align-items: center; gap: 4px; }
+@media (max-width: 640px) { .vibe-bar__name { max-width: 160px; } }
+/* Vibe's brief card: the whole summary is the decision, so it wraps instead of ending in an ellipsis. */
+.askcard__why[data-full] { white-space: normal; overflow: visible; text-overflow: clip; display: block; -webkit-line-clamp: unset; max-height: none; }
+
+/* Vibe's answer panel (components/VibeInbox.tsx) and the ways to it */
+.vibe-bar__answer { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--st-r-pill); border: 1px solid var(--st-accent); background: var(--st-accent-tint); color: var(--st-accent-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; animation: vibe-pulse 1.6s ease-in-out infinite; }
+@keyframes vibe-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--st-accent) 45%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; } }
+@media (prefers-reduced-motion: reduce) { .vibe-bar__answer { animation: none; } }
+.vibe-inbox { display: flex; flex-direction: column; gap: 14px; overflow: auto; padding: 14px 16px; }
+.vibe-inbox__head { display: flex; align-items: center; justify-content: space-between; }
+.vibe-inbox__said, .vibe-inbox__brief { border: 1px solid var(--st-line); border-radius: var(--st-r-lg); padding: 10px 12px; background: var(--st-surface); }
+.vibe-inbox__brief { display: flex; flex-direction: column; gap: 10px; border-color: var(--st-accent); }
+.vibe-inbox__q { display: flex; align-items: center; gap: 8px; }
+.vibe-inbox__full > summary { cursor: pointer; font-size: var(--st-fs-sm); color: var(--st-ink-muted); }
+.vibe-inbox__changes { width: 100%; resize: vertical; font: inherit; padding: 8px 10px; border-radius: var(--st-r-md, 8px); border: 1px solid var(--st-line); background: var(--st-surface-2, transparent); color: inherit; }
+.vibe-inbox__acts { display: flex; justify-content: flex-end; gap: 8px; }
+.vibe-inbox .askq { max-width: none; }
+.vibe-dock-line { display: inline-flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border-radius: var(--st-r-lg); border: 1px solid var(--st-accent); background: var(--st-accent-tint); color: var(--st-accent-text); font: inherit; font-weight: 600; cursor: pointer; }
+
+/* A new Vibe chat without a project folder (components/VibeStart.tsx) */
+.vibe-start { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: 640px; margin: 8vh auto 0; padding: 22px 24px; border: 1px solid var(--st-line); border-radius: var(--st-r-lg); background: var(--st-surface); }
+.vibe-start__head { display: flex; align-items: center; gap: 10px; }
+.vibe-start__head h2 { margin: 0; }
+.vibe-start__or { margin: 8px 0 0; }
+.vibe-start .projects { width: 100%; }

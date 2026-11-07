@@ -24,6 +24,7 @@ import type { ChatProfileId } from '../lib/types';
 const PROFILE_GROUPS: { id: ChatProfileId; label: string; icon: IconName }[] = [
     { id: 'chat', label: 'Chat', icon: 'chat' },
     { id: 'code', label: 'Code', icon: 'folder' },
+    { id: 'vibe', label: 'Vibe', icon: 'bolt' },
     { id: 'rp', label: 'RP', icon: 'skills' },
 ];
 export function Sidebar({ containerRef }: {

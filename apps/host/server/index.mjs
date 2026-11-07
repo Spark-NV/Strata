@@ -87,6 +87,7 @@ import { findFreePort, listenProblem } from './ports.mjs';
 import { validateChatImages } from './chat-images.mjs';
 import { createTimeSkip, measureFolder, timeskipRevisionMessage, imageTypeOf } from './timeskip.mjs';
 import { createProfileStore, profileSampling, PROFILE_IDS } from './profiles.mjs';
+import { BOOK_DIR as VIBE_BOOK_DIR, loadBook as vibeLoadBook, loadRun as vibeLoadRun, publicState as vibePublicState } from './agent/vibe-state.mjs';
 import { createPinnedModel, pinConfig } from './pinned-model.mjs';
 import { createRpStore } from './rp/store.mjs';
 import { createRpRoutes } from './rp/routes.mjs';
@@ -216,8 +217,12 @@ async function pictureRefusal(connection, model) {
   const fix = `open Settings → Models, edit "${connection.name}" and turn on "Read pictures with this model"`;
   return `"${model.name}" is set not to read pictures (or its server says it cannot: a llama-server started without --mmproj, or a text-only model). If that is wrong, ${fix}. Otherwise choose a model that reads pictures.`;
 }
+const VIBE_STATE_DIR = join(store.DATA_DIR, 'vibe');
 const agent = createAgentBridge({
   profilePolicyFile: profileStore.policyFile,
+  // Vibe chats: the run state of each project (never in the project itself) and the shared folder a Vibe project must not be.
+  vibeStateDir: VIBE_STATE_DIR,
+  vibeDefaults: [WORKSPACE],
   memoryFile: memoryStore.file,
   bindProfile: (harnessSessionId, profileId) => profileStore.bindSession(harnessSessionId, profileId),
   tools: () => agentTools.profileView(),
@@ -1840,6 +1845,22 @@ async function api(req, res, path, method, url) {
   if (path === '/api/projects' && method === 'GET') return json(res, 200, { projects: projects.list() });
   if (path === '/api/projects' && method === 'POST') { try { projects.add((await readBody(req)).path); return json(res, 200, { projects: projects.list() }); } catch (e) { return error(res, 400, e.message); } }
   if (path === '/api/projects' && method === 'DELETE') { projects.remove(url.searchParams.get('path') ?? ''); return json(res, 200, { projects: projects.list() }); }
+  // Vibe chats: the project's stage and book, for the bar above the conversation (agent/vibe-state.mjs).
+  if (path === '/api/vibe/state' && method === 'GET') {
+    const chatId = url.searchParams.get('chatId') ?? '';
+    const root = chatFolders.get(chatId) ?? agent.workingFolder?.(chatId) ?? null;
+    if (!root || !existsSync(root)) return json(res, 200, { root: null });
+    return json(res, 200, vibePublicState(root, vibeLoadRun(VIBE_STATE_DIR, root), vibeLoadBook(root)));
+  }
+  if (path === '/api/vibe/book' && method === 'GET') {
+    const chatId = url.searchParams.get('chatId') ?? '';
+    const page = { brief: 'BRIEF.md', decisions: 'DECISIONS.md', status: 'STATUS.md' }[url.searchParams.get('page') ?? 'brief'];
+    const root = chatFolders.get(chatId) ?? agent.workingFolder?.(chatId) ?? null;
+    if (!page || !root) return error(res, 404, 'No project book for this chat yet.');
+    const file = join(root, VIBE_BOOK_DIR, page);
+    if (!existsSync(file)) return error(res, 404, 'No project book for this chat yet.');
+    return json(res, 200, { path: file, title: page, text: readFileSync(file, 'utf8') });
+  }
   if (path === '/api/projects/agents-file' && method === 'POST') { try { return json(res, 200, await projects.openAgentsFile((await readBody(req)).path)); } catch (e) { return error(res, 400, e.message); } }
   if (path === '/api/files/open' && method === 'POST') {
     const body = await readBody(req);
@@ -1999,6 +2020,17 @@ async function api(req, res, path, method, url) {
   if (memoryRoute && method === 'PUT') { try { memoryStore.update(memoryRoute[1], (await readBody(req)).text); return json(res, 200, { items: memoryStore.list() }); } catch (e) { return error(res, 400, e.message); } }
   if (memoryRoute && method === 'DELETE') { memoryStore.remove(memoryRoute[1]); return json(res, 200, { items: memoryStore.list() }); }
   if (path === '/api/pinned' && method === 'GET') return json(res, 200, pinned.state());
+  // The pinned server's own live numbers (the same /metrics an app-started engine has), for the Monitor: the agent's requests go to it
+  // through the Harness, so the host's own counters never see them.
+  if (path === '/api/pinned/metrics' && method === 'GET') {
+    const base = pinConfig()?.base;
+    if (!base) return error(res, 404, 'No model is pinned.');
+    try {
+      const r = await fetch(`${base.replace(/\/v1$/, '')}/metrics${url.searchParams.get('requests') === 'all' ? '?requests=all' : ''}`, { signal: AbortSignal.timeout(2500) });
+      if (!r.ok) return error(res, 502, `The model server answered ${r.status}.`);
+      return json(res, 200, await r.json());
+    } catch (e) { return error(res, 502, `The model server did not answer: ${e.message}`); }
+  }
   if (path === '/api/pinned/start' && method === 'POST') { try { await pinned.ensure(); return json(res, 200, pinned.state()); } catch (e) { return error(res, 503, e.message); } }
   // The assistant's model requests, with the person's Response settings added (llm-shape.mjs). This computer only.
   const llmRoute = /^\/api\/internal\/agent-llm\/([A-Za-z0-9_.~-]+)(\/.*)$/.exec(path);

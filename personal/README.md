@@ -111,11 +111,15 @@ folder links `dist` and `server` to `apps/host`. After a change to the UI run `n
 `apps/host`, then restart the app; a change to `apps/host/server` only needs the restart. The agent
 harness is the AppImage's own (`STRATA_HARNESS_DIR`). The app's data is in `~/.strata/data`.
 
+The Monitor page reads the pinned server's own `/metrics` every 2 s while it is open (`/api/pinned/metrics`),
+so speed, prompt reading, state and requests show for agent work too (agent requests reach the server
+through the Harness, past the host's own counters).
+
 It is pinned to this machine's model (`apps/host/server/pinned-model.mjs`): `STRATA_PIN_BASE_URL`
 names the server, `STRATA_PIN_SERVICE` the unit it starts when the server does not answer (about a
 minute), and every chat runs on it; the model pickers and the Models screens are hidden.
 
-The sidebar has three profiles, Chat, Code and RP (`apps/host/server/profiles.mjs`), configured in
+The sidebar has four profiles, Chat, Code, Vibe and RP (`apps/host/server/profiles.mjs`), configured in
 Settings -> Profiles: system message, reasoning effort (Medium or Extra High), thinking budget,
 sampling, output cap, tools on or off, approval mode, which tool groups and connected tools, and which
 skills. A profile's tools and skills are left out of what the model is offered and refused by the
@@ -173,4 +177,51 @@ short template with the sections a good one has), and Write / Improve with the a
 chat a prepared message: read the project, ask at most 6 questions about what the code cannot tell
 (as answer cards), write a short AGENTS.md, and add one-line CLAUDE.md / QWEN.md / GEMINI.md pointers
 for the tools you say you use. The agent harness loads AGENTS.md into every Code chat in that folder.
+
+### Vibe
+
+A Vibe chat is Code with a Head AI that owns the engineering: you say what you want to exist, it
+asks what matters, writes a brief, and after you approve it builds, checks and hands the work over
+(`apps/host/server/agent/plugins/strata-vibe.mjs`, `vibe-state.mjs`, the gate's `vibeDecision`).
+Pick a project folder first (an empty one for something new). The bar above the chat shows the stage
+(Planning, Building, Handed over), the milestones, the last check and the branch, with Brief /
+Decisions / Status buttons that open the project book. When the Head waits for you, the bar shows a pulsing
+"Needs your answer" button (and the dock above the message box becomes one line pointing to it): it opens
+the answer panel on the right (`src/components/VibeInbox.tsx`) with the Head's latest message formatted,
+its question cards with room to read, and for the brief the whole BRIEF.md with Approve and build, Deny,
+or Request changes in your own words (sent to the Head as its next message).
+
+- **Stages, enforced by the gate, not the prompt.** Planning: nothing in the project can change
+  (edits and changing commands are refused); the Head reads, researches and asks 3-5 questions per
+  round with ask cards. It writes the brief with `vibe_brief` and asks for approval with `vibe_start`
+  (one card). Building: everything runs without a permission prompt (installing, `sudo -n pacman`,
+  any tool); only sending the work off this computer (git push, publishing, creating a remote
+  repository) asks. Builders and checkers keep throwaway files in /tmp; `scratchpad/`, `tmp/` and local
+  database files (`*.db`, `*.sqlite`) are ignored from the start. A small task skips the approval card. Besides the Head's own questions, that
+  is the only card. The Mode menu is replaced by "Vibe".
+- **Save points.** Git is set up without asking (it works inside a parent repository when there is
+  one, and `.gitignore` gets the usual caches plus any secrets, generated folders and files over 50 MB
+  it found). Your own uncommitted changes are committed apart first ("Your work before Vibe"). The work
+  runs on a `vibe/<name>` branch; the app commits before every helper task, before checks and at every
+  milestone. `vibe_finish` merges the checked work into the branch it started from by itself (the
+  work branch is kept, so it can be undone), and the Head then presents it.
+- **Done means checked.** A milestone closes (`vibe_milestone_done`) only when the brief's check
+  commands passed on the latest saved version and an `@checker` helper that changed no files in that
+  milestone recorded a passing `vibe_review` for the same version. A new dependency, more than 15
+  deleted files or a protected file in a milestone needs a recorded decision. A "small" task that
+  grows past 8 files must become medium and be approved.
+- **Loops.** 3 failed checks in a row block changes until the Head records a different approach
+  (`vibe_decide` kind rethink); 5 block them until you answer. One builder at a time: a helper cannot
+  change files while another helper that changed files is still working.
+- **The project book** (`.strata/project/` in the project, committed): `book.json` plus BRIEF.md,
+  DECISIONS.md, STATUS.md, written only by the vibe tools. Requirements are marked confirmed, assumed
+  or open; decisions say who decided (you or Head), why and what was rejected; lessons list approaches
+  that failed. A short summary of it goes in front of every message, so it survives summaries and
+  restarts. The run state (stage, last check, reviews, who changed files) is outside the project, in
+  `~/.strata/data/vibe/projects/<key>.json`.
+- **Helpers**: `@builder` (one task, tests, report), `@checker` (independent review, changes nothing),
+  `@researcher`, `@explorer`; editable in Settings -> Profiles -> Vibe like the other profiles.
+- Not done yet: sandboxing builders to the project folder at the OS level, hiding git credentials
+  from them (pushing is only caught by its command words), and a backup of the save points outside
+  the project.
 

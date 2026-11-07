@@ -28,6 +28,7 @@ export function askQuestion(ask: Ask): string {
     case 'stop-task': return tr("Stop a background task?");
     case 'open-page': return tr("Open the web page {0}?", p);
     case 'use-tool': return tr("Use the connected tool {0}?", p);
+    case 'vibe-start': return tr("Approve the brief and start building?");
     default: return tr("Use the tool {0}?", p);
   }
 }

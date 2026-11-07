@@ -48,7 +48,7 @@ test('the profile adds a response-settings copy of each shapeable route (local, 
   assert.deepEqual(Object.keys(local.shaped), ['0', '2048', '8192', '32768', 'profiles']);
   assert.equal(local.shaped[8192], 'strata-local~s8192');
   // One more copy per budget for each chat profile (Chat, Code, RP), marked with the x-strata-profile header.
-  assert.deepEqual(Object.keys(local.shaped.profiles), ['chat', 'code', 'rp']);
+  assert.deepEqual(Object.keys(local.shaped.profiles), ['chat', 'code', 'rp', 'vibe']);
   assert.equal(local.shaped.profiles.code[8192], 'strata-local~s8192~code');
   const keysOf = shaped => [...['0', '2048', '8192', '32768'].map(b => shaped[b]), ...Object.values(shaped.profiles).flatMap(p => Object.values(p))];
   assert.deepEqual(Object.keys(profile.shapeTargets).sort(), [...keysOf(local.shaped), ...keysOf(profile.routes.find(r => r.connectionId === 'lan').shaped)].sort());

@@ -20,7 +20,7 @@ export function UsageDashboard({ loaded, session }: {
     const pinnedOn = useStore(s => s.pinned?.enabled === true);
     const canChat = loaded || !!remoteModel || !!native?.instances.some(i => i.id === native.defaultId && i.status === 'ready');
     const sessions = useStore(s => s.sessions), library = useStore(s => s.library);
-    const code = session?.profile === 'code';
+    const code = session?.profile === 'code' || session?.profile === 'vibe';
     const tabs = (code ? ['projects', 'overview', 'models'] : ['overview', 'models']) as ('projects' | 'overview' | 'models')[];
     const [tab, setTab] = useState<'projects' | 'overview' | 'models'>(code ? 'projects' : 'overview'), [period, setPeriod] = useState<UsagePeriod>('all'), [expanded, setExpanded] = useState(false);
     const now = new Date();

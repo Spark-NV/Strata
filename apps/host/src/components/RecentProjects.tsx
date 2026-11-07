@@ -29,7 +29,8 @@ const ago = (iso: string | null) => {
   return d < 1 ? tr('today') : d < 2 ? tr('yesterday') : tr('{0} days ago', [Math.floor(d)]);
 };
 
-export function RecentProjects({ session }: { session: Session }) {
+/** `simple`: only picking a folder (Vibe's start screen), without the AGENTS.md buttons. */
+export function RecentProjects({ session, simple = false }: { session: Session; simple?: boolean }) {
   const current = useChatFolder(session.id);
   const [list, setList] = useState<Project[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,13 +62,13 @@ export function RecentProjects({ session }: { session: Session }) {
           <span className="projects__name">{p.name}</span>
           <span className="projects__meta xs muted">{p.exists ? <>{p.branch ? `${p.branch} · ` : ''}{p.instructions.length ? p.instructions.join(', ') : tr('no agent instructions')} · {ago(p.usedAt)}</> : tr('folder not found')}</span>
         </button>
-        {p.exists ? <>
+        {p.exists && !simple ? <>
           <Btn size="sm" variant="ghost" disabled={busy} title={tr(agents ? 'Open AGENTS.md in your editor' : 'Create AGENTS.md from a template and open it')} onClick={() => void edit(p)}>{tr(agents ? 'Edit AGENTS.md' : 'New AGENTS.md')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy || session.messages.length > 0} title={tr('The assistant reads the project, asks you what it cannot find out, and writes AGENTS.md')} onClick={() => void write(p)}>{tr(agents ? 'Improve with the assistant' : 'Write with the assistant')}</Btn>
         </> : null}
         <IconBtn name="x" title={tr('Remove from the list')} onClick={() => void run(() => api.del(`/api/projects?path=${encodeURIComponent(p.path)}`))} size={14} />
       </div>;
     })}
-    <div style={{ marginTop: 10 }}><Btn size="sm" icon="folder-plus" disabled={busy} onClick={() => void run(() => chooseChatFolder(session.id))}>{tr('Open another folder…')}</Btn></div>
+    {simple ? null : <div style={{ marginTop: 10 }}><Btn size="sm" icon="folder-plus" disabled={busy} onClick={() => void run(() => chooseChatFolder(session.id))}>{tr('Open another folder…')}</Btn></div>}
   </div>;
 }

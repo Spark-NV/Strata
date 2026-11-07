@@ -118,6 +118,8 @@ export function askFor(name, args = {}, described = null) {
       try { host = new URL(host).hostname; } catch { /* keep the text */ }
       return { id: 'open-page', params: [clip(host, 80)], detail: clip(args.url, 160) };
     }
+    // Vibe's one decision card (not a permission): approving the brief. The summary is what the person reads.
+    case 'vibe_start': return { id: 'vibe-start', params: [], detail: clip(args.summary, 700) };
     default:
       if (String(name).startsWith('mcp__')) return { id: 'use-tool', params: [String(name).split('__').slice(1).join(' / ')], why: 'use-tool-why' };
       return { id: 'use-other', params: [String(name)] };

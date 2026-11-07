@@ -136,8 +136,8 @@ export interface ModelConnection {
 export interface ModelProviders { catalog: ModelProviderPreset[]; connections: ModelConnection[] }
 export interface RemoteModelSelection { connectionId: string; modelId: string }
 /** The chat profiles (server/profiles.mjs): each chat is in one, which gives its prompt, thinking, sampling, tools and skills. */
-export type ChatProfileId = 'chat' | 'code' | 'rp';
-export const CHAT_PROFILE_IDS: ChatProfileId[] = ['chat', 'code', 'rp'];
+export type ChatProfileId = 'chat' | 'code' | 'rp' | 'vibe';
+export const CHAT_PROFILE_IDS: ChatProfileId[] = ['chat', 'code', 'vibe', 'rp'];
 export type ProfileSampling = { temperature: number | null; top_p: number | null; top_k: number | null; min_p: number | null; presence_penalty: number | null; frequency_penalty: number | null; repetition_penalty: number | null; seed: number | null };
 export interface ChatProfile {
   id: ChatProfileId; name: string; systemPrompt: string; promptPlacement: 'add' | 'replace'; effort: 'Medium' | 'High'; thinkingBudget: number;
