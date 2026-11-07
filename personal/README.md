@@ -89,6 +89,15 @@ Reasoning effort defaults to `xhigh` (the model's own default): line 17 of
 `qwen38-fixed-chat-template.medium-default.jinja.bak`. A request can still ask
 for `reasoning_effort` low or medium. The server's answer room (on by default)
 closes the thinking early enough to leave a quarter of a request's `max_tokens`
-for the answer, and `"reasoning_budget_tokens": 32768` caps the thinking of a
-request that sets no limit. Checked 2026-11-06: a 1,200-token cap thought 688
-tokens and answered in full.
+for the answer, and `"reasoning_budget_tokens": 49152` caps the thinking of a
+reply at about 49K tokens (5-6 minutes), only against runaway thinking; a
+thinking loop is wrapped up earlier by `reasoning_loop_recovery`. Checked
+2026-11-06: a 1,200-token cap thought 688 tokens and answered in full.
+
+The Qwen Swift Code launchers (`~/.local/bin/qwen-swift-code`, `-yolo`) send
+`reasoning_effort: "high"` (the template's xhigh) and `max_tokens: 65536`
+from `~/.config/qwen-swift/qwen-home/settings.json`, so each reply may think up
+to 49,152 tokens and keeps 16,384 for its answer. Typing `<|think_medium|>` in
+a message switches to medium from that message on, `<|think_xhigh|>` switches
+back, `<|think_low|>` and `<|think_off|>` also work; the template removes the
+tag before the model sees it.
