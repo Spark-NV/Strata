@@ -81,4 +81,4 @@ The token embedding is read in BF16 from
 of the GGUF's IQ4_XS copy: perplexity 4.100 -> 4.053 on the quality set, speed
 unchanged, 1212 MiB of host RAM instead of 322 MiB (results README). The file is
 Qwen's BF16 table with the abliteration's refusal direction removed
-(`tools/embd_bf16_ablit.py`); remove the two `--embd-gguf` lines to go back.
+(`tools/embd_bf16_ablit.py`); remove the `--embd-gguf` entry from `args` to go back.
