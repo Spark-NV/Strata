@@ -23,6 +23,7 @@ import { standardPreset } from './preset.mjs';
 import { validMcpName } from '../mcp-names.mjs';
 import { BUDGETS, isPrivateHost } from './llm-shape.mjs';
 import { DDG_PROVIDER_ID } from '../web-search-ddg.mjs';
+import { PROFILE_IDS } from '../profiles.mjs';
 
 const PROTOCOL = { 'openai-chat': 'openai-completions', 'openai-responses': 'openai-responses', anthropic: 'anthropic-messages' };
 
@@ -193,7 +194,7 @@ export function outputBudget(context, maxOutput = null) {
 /** What a local model, or an OpenAI-style server on this network, takes for the thinking level (see the comment where a local route is built). */
 const THINKING_COMPAT = { supportsStore: false, thinkingFormat: 'chat-template', chatTemplateKwargs: { enable_thinking: { $var: 'thinking.enabled' }, reasoning_effort: { $var: 'thinking.effort', omitWhenOff: true } } };
 
-export function buildProfile({ local = [], connections = [], gate = true, tools = NO_TOOLS_SETTINGS, skillsDir = null, proxyBase = null, searchMock = null, defaultLocalId = null }) {
+export function buildProfile({ local = [], connections = [], gate = true, tools = NO_TOOLS_SETTINGS, skillsDir = null, proxyBase = null, searchMock = null, defaultLocalId = null, policyFile = null }) {
   const providers = {};
   const env = {};
   const routes = [];
@@ -206,13 +207,18 @@ export function buildProfile({ local = [], connections = [], gate = true, tools 
   const shapeTargets = {};
   function addShaped(route, def, realBase) {
     if (!proxyBase) return null;
-    const keys = {};
-    for (const budget of [0, ...BUDGETS]) {
-      const key = `${route}~s${budget}`;
-      providers[key] = { ...def, displayName: `${def.displayName} (with your response settings)`, baseURL: `${proxyBase}/${key}/v1`, ...(budget ? { headers: { ...(def.headers ?? {}), 'x-strata-budget': String(budget) } } : {}) };
-      shapeTargets[key] = realBase;
-      for (const m of def.models) { const w = m.contextWindow, out = m.maxTokens; compaction.push({ provider: key, model: m.id, headroomTokens: compactionHeadroom(w, out) }); }
-      keys[budget] = key;
+    const keys = { profiles: {} };
+    // One copy per thinking budget, and per budget one for each chat profile (Chat, Code, RP): the forwarding endpoint applies that
+    // profile's prompt, sampling, tools and skills (../profiles.mjs). The plain copies carry no profile, as before.
+    for (const profile of [null, ...PROFILE_IDS]) {
+      for (const budget of [0, ...BUDGETS]) {
+        const key = `${route}~s${budget}${profile ? `~${profile}` : ''}`;
+        const headers = { ...(def.headers ?? {}), ...(budget ? { 'x-strata-budget': String(budget) } : {}), ...(profile ? { 'x-strata-profile': profile } : {}) };
+        providers[key] = { ...def, displayName: `${def.displayName} (with your response settings)`, baseURL: `${proxyBase}/${key}/v1`, ...(Object.keys(headers).length ? { headers } : {}) };
+        shapeTargets[key] = realBase;
+        for (const m of def.models) { const w = m.contextWindow, out = m.maxTokens; compaction.push({ provider: key, model: m.id, headroomTokens: compactionHeadroom(w, out) }); }
+        if (profile) (keys.profiles[profile] ??= {})[budget] = key; else keys[budget] = key;
+      }
     }
     return keys;
   }
@@ -319,7 +325,7 @@ export function buildProfile({ local = [], connections = [], gate = true, tools 
     { id: 'subagent', config: { maxActiveSubagents: slots > 0 ? Math.max(slots, MIN_LOCAL_HELPERS) : DEFAULT_API_HELPERS } },
     // Manual asks before a change runs, so the person sees one Approve/Deny card and nothing has happened yet.
     // Its web question names the search service the person chose (a keyed one only when its key is saved), and the person's switch skips the question.
-    ...(gate ? [{ insert: [{ id: 'strata-gate', name: GATE_PLUGIN, config: { web: { provider: SEARCH_NAMES[keyed ?? 'builtin'], skipAsk: tools.webWithoutAsking === true } } }] }] : []),
+    ...(gate ? [{ insert: [{ id: 'strata-gate', name: GATE_PLUGIN, config: { web: { provider: SEARCH_NAMES[keyed ?? 'builtin'], skipAsk: tools.webWithoutAsking === true }, ...(policyFile ? { policyFile } : {}) } }] }] : []),
     // Compaction decides from what the model server measured, and its summary requests always fit the window (plugins/strata-context.mjs).
     { insert: [{ id: 'strata-context', name: CONTEXT_PLUGIN, config: {} }] },
     // Helper agents on a model the person names: every model the app can reach is allowed, and the plugin makes the choice forgiving (plugins/strata-models.mjs).

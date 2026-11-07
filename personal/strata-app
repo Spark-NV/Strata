@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Strata desktop app: the 0.2.11 window and runtime (unpacked in ~/Applications/strata-runtime) running the host and
+# UI of the Spark fork (/home/spark/Apps/Strata/apps/host, symlinked). Rebuild the UI with `npm run build` in apps/host.
+export STRATA_HARNESS_DIR=/home/spark/Applications/strata-runtime/squashfs-root/usr/lib/Strata/harness
+# The one model this app uses (apps/host/server/pinned-model.mjs): started through its service when it does not answer.
+export STRATA_PIN_BASE_URL=http://127.0.0.1:8082/v1
+export STRATA_PIN_SERVICE=qwen-orca-iq4xs.service
+export STRATA_PIN_NAME="Qwen3.8 Flash Next Uncensored"
+exec /home/spark/Applications/strata-runtime/squashfs-root/AppRun "$@"

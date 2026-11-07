@@ -5,6 +5,7 @@ import { Btn, Field, Icon, Select, type IconName } from '../components/ui';
 import { Brand } from '../components/Brand';
 import { SettingsModels } from '../components/SettingsModels';
 import { SettingsTools } from '../components/SettingsTools';
+import { SettingsProfiles } from '../components/SettingsProfiles';
 import { SettingsStorage } from '../components/SettingsStorage';
 import { PrivacyNotes } from '../components/PrivacyNotes';
 import { AboutVersions, SettingsUpdates } from '../components/SettingsUpdates';
@@ -15,9 +16,11 @@ import { ApprovalNotifySetting, DoneSoundSetting, PortSetting, TraySetting, useS
 import { LANGUAGES } from '../lib/i18n';
 import { setLanguage, setWhileBusy } from '../lib/store';
 import { CONTENT_FONT_RANGE, setContentFontSize, setDensity, setFocus, setMotion, setShortcuts, setTheme, setTransparency, setUiScale, UI_SCALES, useStore, setSettingsSection } from '../lib/store';
-const PANELS = [{ name: 'Appearance', icon: 'sun', sections: ['General', 'Reading & focus'] }, { name: 'Models', icon: 'models', sections: [] }, { name: 'Tools', icon: 'tool', sections: [] }, { name: 'Storage', icon: 'disk', sections: ['Storage'] }, { name: 'Engine', icon: 'engine', sections: [] }, { name: 'About', icon: 'info', sections: ['About', 'Update', 'Privacy'] }] as const;
+const PANELS = [{ name: 'Appearance', icon: 'sun', sections: ['General', 'Reading & focus'] }, { name: 'Models', icon: 'models', sections: [] }, { name: 'Profiles', icon: 'chat', sections: [] }, { name: 'Tools', icon: 'tool', sections: [] }, { name: 'Storage', icon: 'disk', sections: ['Storage'] }, { name: 'Engine', icon: 'engine', sections: [] }, { name: 'About', icon: 'info', sections: ['About', 'Update', 'Privacy'] }] as const;
 export function SettingsScreen() {
     const prefs = useStore(s => s);
+    // A pinned model is the only one: no Models panel to manage others.
+    const panels = PANELS.filter(p => !(prefs.pinned?.enabled && p.name === 'Models'));
     const [shell, saveShell] = useShellState();
     const active = prefs.settingsSection;
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -54,16 +57,16 @@ export function SettingsScreen() {
             if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key))
                 return;
             e.preventDefault();
-            const index = PANELS.findIndex(p => p.name === active);
-            const next = e.key === 'Home' ? 0 : e.key === 'End' ? PANELS.length - 1 : (index + (['ArrowDown', 'ArrowRight'].includes(e.key) ? 1 : -1) + PANELS.length) % PANELS.length;
-            activate(PANELS[next].name);
-            document.getElementById(`settings-tab-${PANELS[next].name}`)?.focus();
+            const index = panels.findIndex(p => p.name === active);
+            const next = e.key === 'Home' ? 0 : e.key === 'End' ? panels.length - 1 : (index + (['ArrowDown', 'ArrowRight'].includes(e.key) ? 1 : -1) + panels.length) % panels.length;
+            activate(panels[next].name);
+            document.getElementById(`settings-tab-${panels[next].name}`)?.focus();
         }}>
-      {tr(PANELS.map(panel => <button key={panel.name} role="tab" id={`settings-tab-${panel.name}`} aria-controls={`settings-panel-${panel.name}`} aria-selected={active === panel.name} tabIndex={active === panel.name ? 0 : -1} className="settingsindex__item" onClick={() => activate(panel.name)}><Icon name={panel.icon as IconName} size={17}/>{tr(panel.name)}</button>))}
+      {tr(panels.map(panel => <button key={panel.name} role="tab" id={`settings-tab-${panel.name}`} aria-controls={`settings-panel-${panel.name}`} aria-selected={active === panel.name} tabIndex={active === panel.name ? 0 : -1} className="settingsindex__item" onClick={() => activate(panel.name)}><Icon name={panel.icon as IconName} size={17}/>{tr(panel.name)}</button>))}
     </nav>
     <div className="settings-pane" ref={scrollRef}>
-      {tr(PANELS.map(panel => <div key={panel.name} role="tabpanel" tabIndex={0} id={`settings-panel-${panel.name}`} aria-labelledby={`settings-tab-${panel.name}`} hidden={active !== panel.name}>
-        {tr(panel.name === 'Models' ? <SettingsModels /> : panel.name === 'Tools' ? (active === panel.name ? <SettingsTools /> : null) : panel.name === 'Engine' && active === panel.name ? <div className="stack stack--lg settings-body"><section className="settings-section"><h2 className="h3" style={{ marginBottom: 14 }}>{tr("Engine")}</h2><NativeOperations /></section></div> : active === panel.name ? <div className="stack stack--lg settings-body">
+      {tr(panels.map(panel => <div key={panel.name} role="tabpanel" tabIndex={0} id={`settings-panel-${panel.name}`} aria-labelledby={`settings-tab-${panel.name}`} hidden={active !== panel.name}>
+        {tr(panel.name === 'Models' ? <SettingsModels /> : panel.name === 'Profiles' ? (active === panel.name ? <SettingsProfiles /> : null) : panel.name === 'Tools' ? (active === panel.name ? <SettingsTools /> : null) : panel.name === 'Engine' && active === panel.name ? <div className="stack stack--lg settings-body"><section className="settings-section"><h2 className="h3" style={{ marginBottom: 14 }}>{tr("Engine")}</h2><NativeOperations /></section></div> : active === panel.name ? <div className="stack stack--lg settings-body">
           {tr(panel.sections.map(section => <section className="settings-section" key={section}>
             <h2 className="h3" style={{ marginBottom: 14 }}>{tr(section)}</h2>
             <div className="st-card st-card--flush">

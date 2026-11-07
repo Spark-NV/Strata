@@ -12,8 +12,17 @@ import { contextTokens } from '../lib/experience';
 import { nativeAction, useNative } from '../lib/native';
 /** The loaded model is shared by all chats; switching uses the existing lifecycle gates. */
 export function ChatModelPicker() {
-    const native = useNative(), remote = useStore(s => s.remoteModel);
+    const native = useNative(), remote = useStore(s => s.remoteModel), pinned = useStore(s => s.pinned);
+    // A pinned model is the only one: its name and state, nothing to choose.
+    if (pinned?.enabled) return <PinnedModelBadge />;
     return native?.instances.length && !remote ? <NativeChatModelPicker /> : <LegacyChatModelPicker />;
+}
+function PinnedModelBadge() {
+    const pinned = useStore(s => s.pinned);
+    if (!pinned) return null;
+    const name = pinned.name ?? pinned.modelId ?? tr('Model');
+    const text = pinned.phase === 'starting' ? tr('Starting {0}…', [name]) : pinned.phase === 'checking' ? tr('Checking {0}…', [name]) : pinned.phase === 'error' ? tr('{0} is not running', [name]) : name;
+    return <span className="chat-model-badge" data-state={pinned.phase} title={pinned.error ?? name}><Icon name="link" size={15}/><span>{text}</span></span>;
 }
 function NativeChatModelPicker() {
     const native = useNative(), providers = useStore(s => s.providers), streaming = useStore(s => s.streaming);

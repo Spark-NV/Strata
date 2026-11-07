@@ -86,6 +86,9 @@ import { apiPath } from './api-paths.mjs';
 import { findFreePort, listenProblem } from './ports.mjs';
 import { validateChatImages } from './chat-images.mjs';
 import { createTimeSkip, measureFolder, timeskipRevisionMessage, imageTypeOf } from './timeskip.mjs';
+import { createProfileStore, profileSampling, PROFILE_IDS } from './profiles.mjs';
+import { createPinnedModel, pinConfig } from './pinned-model.mjs';
+import { TOOL_GROUPS } from './agent/tools-catalog.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -124,6 +127,13 @@ const hub = new EventHub();
 /** The chats, as files in the profile's data folder (chat-store.mjs). */
 const chatStore = createChatStore({ dir: store.DATA_DIR, privateDir: makePrivateDir });
 const modelProviders = createModelProviders({ directory: store.DATA_DIR, knownThinks: (connection, modelId) => visionProbe.knownThinks(connection, modelId), changed: value => hub.send('providers', withPictureAnswers(value)) });
+/** The chat profiles (Chat, Code, RP): prompt, thinking, sampling, tools and skills per profile (profiles.mjs). */
+const profileStore = createProfileStore({ dataDir: store.DATA_DIR, changed: value => hub.send('profiles', value) });
+/** The one model this app uses, when the launcher pins it (pinned-model.mjs): started if it is not running, used by every chat. */
+const PIN = pinConfig();
+const pinned = createPinnedModel({ config: PIN, modelProviders, log: line => console.log(line) });
+pinned.onChange(state => hub.send('pinned', state));
+if (PIN) void pinned.ensure().catch(e => console.error('pinned model:', e.message));
 const imageModels = createImageModels({ dataDir: store.DATA_DIR, modelsDir: () => store.MODELS_DIR, real: models.REAL, changed: value => hub.send('image-models', value) });
 /* The installed app ships Strata Control (python + strata_control) next to the host; a source checkout has none and keeps its older paths. */
 const CONTROL = findControl();
@@ -172,7 +182,7 @@ const native=createNativeControl({control,ready:bundledEngine,appUpdater,hardwar
    pinned component (STRATA_HARNESS_DIR), not part of this host, so its absence is a visible capability
    state and the chat falls back to the direct path with a notice, never silently to another model. */
 // What the person chose in Settings -> Tools (tool groups, web search service and key, the browser, their own tools).
-const llmProxy = createLlmProxy({ targetOf: key => agent.llmTarget(key), samplingNow: () => samplingFromExpert(store.get().expert) });
+const llmProxy = createLlmProxy({ targetOf: key => agent.llmTarget(key), samplingNow: () => samplingFromExpert(store.get().expert), profileOf: id => (PROFILE_IDS.includes(id) ? profileStore.get(id) : null) });
 const agentTools = createAgentTools({ read: () => store.get().agentTools, write: value => store.update({ agentTools: value }), dataDir: store.DATA_DIR, browser: () => ({ ...findBrowser(), cli: findPlaywrightMcp(agent.harnessDir()) }) });
 agentTools.ensureFile();
 const visionProbe = createVisionProbe();
@@ -197,6 +207,8 @@ async function pictureRefusal(connection, model) {
   return `"${model.name}" is set not to read pictures (or its server says it cannot: a llama-server started without --mmproj, or a text-only model). If that is wrong, ${fix}. Otherwise choose a model that reads pictures.`;
 }
 const agent = createAgentBridge({
+  profilePolicyFile: profileStore.policyFile,
+  bindProfile: (harnessSessionId, profileId) => profileStore.bindSession(harnessSessionId, profileId),
   tools: () => agentTools.profileView(),
   skillsDir: () => AGENT_SKILLS,
   onGoal: (chatId, goal) => hub.send('goal', { chatId, goal }),
@@ -579,7 +591,7 @@ function clientName(req) {
   return 'Local client';
 }
 
-async function runRemoteTurn({ selection, message, history, images = [], thinking, onFrame, signal, workspaceId }) {
+async function runRemoteTurn({ selection, message, history, images = [], thinking, thinkingBudget = 0, profile = null, onFrame, signal, workspaceId }) {
   const controller = new AbortController();
   const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   let entry;
@@ -587,10 +599,18 @@ async function runRemoteTurn({ selection, message, history, images = [], thinkin
   try {
     const { connection, model } = modelProviders.resolve(selection);
     if (connection.protocol === 'openai-chat' && model.reasoning == null) await visionProbe.check(connection, model.id);
-    const appliedSkills = selectSkills(skillState, message, workspaceId);
+    // A profile without tools still gets the skills it allows; one with skills off gets none.
+    const appliedSkills = selectSkills(skillState, message, workspaceId).filter(sk => !profile || (profile.tools.groups.skills !== false && (profile.skills.all || profile.skills.allow.includes(sk.name))));
     entry = serving.open({ client: 'Strata chat', endpoint: connection.protocol === 'anthropic' ? '/messages' : connection.protocol === 'openai-responses' ? '/responses' : '/chat/completions', model: `${connection.name} · ${model.name}`, cancel: () => controller.abort(new DOMException('Cancelled by the user', 'AbortError')) });
     serving.mark(entry.id, { state: 'generating' });
-    const result = await modelProviders.stream({ selection, message, history, images, thinking, signal: requestSignal, systemPrompt: ['You are Strata, a helpful assistant. Answer clearly. Do not claim to have read files or performed actions unless their results are included in the conversation.', skillInstructions(appliedSkills)].filter(Boolean).join('\n\n'), onFrame: frame => {
+    // The profile's prompt replaces the app's short one, or follows it; its sampling, output cap and thinking budget go into the request.
+    const ownPrompt = profile?.systemPrompt?.trim() ?? '';
+    const basePrompt = 'You are Strata, a helpful assistant. Answer clearly. Do not claim to have read files or performed actions unless their results are included in the conversation.';
+    const systemPrompt = [profile && ownPrompt && profile.promptPlacement === 'replace' ? ownPrompt : basePrompt, profile?.promptPlacement === 'add' ? ownPrompt : '', skillInstructions(appliedSkills)].filter(Boolean).join('\n\n');
+    // Only the profile's own budget: an API model never took the composer's (the server's answer room still keeps room for the answer).
+    const budget = profile?.thinkingBudget > 0 ? profile.thinkingBudget : 0;
+    const extra = { ...(profile ? profileSampling(profile) : {}), ...(profile?.maxTokens ? { max_tokens: profile.maxTokens } : {}), ...(budget ? { reasoning_budget_tokens: budget } : {}) };
+    const result = await modelProviders.stream({ selection, message, history, images, thinking, signal: requestSignal, systemPrompt, extra, historyLimit: profile ? profile.historyLimit : 40, onFrame: frame => {
       if (frame.type === 'start') noteSkillUse(appliedSkills);
       if (frame.type === 'done') serving.mark(entry.id, { tokensIn: frame.tokensIn, tokensOut: frame.tokensOut, usageSource: frame.usageSource });
       onFrame({ ...frame, requestId: entry.id, model: model.name, contextMax: model.contextMax, remoteModel: true, ...(frame.type === 'start' ? { skills: appliedSkills.map(s => s.name) } : {}) });
@@ -637,7 +657,7 @@ async function runAgentTurn({ res, controller, chatId, body, message, workspaceI
     const researchLine = /^\/research(?:\s+([\s\S]*))?$/i.exec(message.trim());
     // "/compact" summarises the older messages of this chat now (it used to go to the model as text, which answered it as a question).
     const compactLine = /^\/compact\s*$/i.test(message.trim());
-    const turnOptions = { chatId, message, workspacePath: cwd, choice, images, mode: typeof body.mode === 'string' ? body.mode : null, thinking: typeof body.thinking === 'string' ? body.thinking : null, thinkingBudget: Number.isFinite(body.thinkingBudget) ? body.thinkingBudget : 0, history: Array.isArray(body.history) ? body.history : [], onFrame: write, signal: controller.signal };
+    const turnOptions = { chatId, message, workspacePath: cwd, choice, images, profile: PROFILE_IDS.includes(body.profile) ? body.profile : null, mode: typeof body.mode === 'string' ? body.mode : null, thinking: typeof body.thinking === 'string' ? body.thinking : null, thinkingBudget: Number.isFinite(body.thinkingBudget) ? body.thinkingBudget : 0, history: Array.isArray(body.history) ? body.history : [], onFrame: write, signal: controller.signal };
     const result = typeof body.planId === 'string' && body.message === '/plan start' ? await agent.planGoal({ ...turnOptions, planId: body.planId })
       : compactLine ? await agent.compactCommand(turnOptions)
       : researchLine ? await agent.researchCommand({ ...turnOptions, line: researchLine[1] ?? '' })
@@ -652,8 +672,8 @@ async function runAgentTurn({ res, controller, chatId, body, message, workspaceI
   }
 }
 
-async function runTurn({ message, history = [], onFrame, signal, client, workspaceId = null, sessionId = null, remoteModel = null, runtimeModelId = undefined, nativeModelId, images=[], useTools=false, thinking='medium', thinkingBudget=0 }) {
-  if (remoteModel) return runRemoteTurn({ selection: remoteModel, message, history, images, thinking, onFrame, signal, workspaceId });
+async function runTurn({ message, history = [], onFrame, signal, client, workspaceId = null, sessionId = null, remoteModel = null, runtimeModelId = undefined, nativeModelId, images=[], useTools=false, thinking='medium', thinkingBudget=0, profile=null }) {
+  if (remoteModel) return runRemoteTurn({ selection: remoteModel, message, history, images, thinking, thinkingBudget, profile, onFrame, signal, workspaceId });
   if(native.hasLive()||nativeModelId){
     let instance;try{instance=native.resolveInstance(nativeModelId??native.state().defaultId);}catch(e){const message=plainNoModel(e.message);onFrame({type:'error',message});return {error:message};}const started=Date.now(),cancel=new AbortController();
     const entry=serving.open({client:client??'Strata chat',endpoint:'/chat/completions',model:instance.apiModelId,instanceId:instance.id,gpuIds:instance.gpus.map(String),cancel:()=>cancel.abort()});
@@ -1946,6 +1966,13 @@ async function api(req, res, path, method, url) {
 
   // --- agent --------------------------------------------------------------
   if (path === '/api/agent/status' && method === 'GET') return json(res, 200, agent.status());
+  // --- chat profiles and the pinned model (profiles.mjs, pinned-model.mjs) -----------------------------------------------------------
+  if (path === '/api/profiles' && method === 'GET') return json(res, 200, { profiles: profileStore.list(), toolGroups: TOOL_GROUPS.map(({ id, area, name, about }) => ({ id, area, name, about })) });
+  const profileRoute = /^\/api\/profiles\/(chat|code|rp)(\/reset)?$/.exec(path);
+  if (profileRoute && method === 'PUT' && !profileRoute[2]) { try { return json(res, 200, { profile: profileStore.save(profileRoute[1], await readBody(req)) }); } catch (e) { return error(res, 400, e.message); } }
+  if (profileRoute && method === 'POST' && profileRoute[2]) return json(res, 200, { profile: profileStore.reset(profileRoute[1]) });
+  if (path === '/api/pinned' && method === 'GET') return json(res, 200, pinned.state());
+  if (path === '/api/pinned/start' && method === 'POST') { try { await pinned.ensure(); return json(res, 200, pinned.state()); } catch (e) { return error(res, 503, e.message); } }
   // The assistant's model requests, with the person's Response settings added (llm-shape.mjs). This computer only.
   const llmRoute = /^\/api\/internal\/agent-llm\/([A-Za-z0-9_.~-]+)(\/.*)$/.exec(path);
   if (llmRoute) { llmProxy(req, res, llmRoute[1], llmRoute[2] + (url.search ?? '')); return undefined; }
@@ -2073,6 +2100,10 @@ async function api(req, res, path, method, url) {
   if ((path === '/api/chat/stream' || path === '/api/plan/start-goal') && method === 'POST') {
     const body = await readBody(req,12*1024*1024);
     if (path === '/api/plan/start-goal') { body.message = '/plan start'; if (typeof body.planId !== 'string') return error(res, 400, 'planId is required'); }
+    // The chat's profile, and the pinned model: every chat runs on it, started first when it is not running (profiles.mjs, pinned-model.mjs).
+    const chatProfile = profileStore.get(typeof body.profile === 'string' ? body.profile : 'chat');
+    if (!chatProfile.agent) body.agent = false;
+    if (PIN) { try { body.remoteModel = await pinned.ensure(); } catch (e) { return error(res, 503, e.message); } }
     let images;try{const named=Array.isArray(body.imageIds)&&body.imageIds.length?uploads.dataUrls(typeof body.sessionId==='string'?body.sessionId:'',body.imageIds):[];images=validateChatImages([...(Array.isArray(body.images)?body.images:[]),...named]);}catch(e){return error(res,400,e.message);}
     if(images.length&&body.remoteModel){const own=modelProviders.withSecrets().find(c=>c.id===body.remoteModel.connectionId);const row=own?.models.find(m=>m.id===body.remoteModel.modelId);const refused=await pictureRefusal(own,row);if(refused)return error(res,409,refused);}
     else if(images.length){let selected;try{selected=native.resolveInstance(body.nativeModelId??native.state().defaultId);}catch(e){return error(res,409,e.message);}if(!selected.vision)return error(res,409,'This model was started without picture reading. Open Models, turn on Read pictures and load it again, or choose a model that reads pictures.');}
@@ -2129,6 +2160,7 @@ async function api(req, res, path, method, url) {
       remoteModel: body.remoteModel ?? null,
       nativeModelId:body.nativeModelId,
       images,useTools:body.useTools===true,thinking:body.thinking??'high',thinkingBudget:Number.isInteger(body.thinkingBudget)&&body.thinkingBudget>0?Math.min(body.thinkingBudget,262144):0,
+      profile: PROFILE_IDS.includes(body.profile) ? chatProfile : null,
     });
     res.end();
     return undefined;

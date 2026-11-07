@@ -135,6 +135,19 @@ export interface ModelConnection {
 }
 export interface ModelProviders { catalog: ModelProviderPreset[]; connections: ModelConnection[] }
 export interface RemoteModelSelection { connectionId: string; modelId: string }
+/** The chat profiles (server/profiles.mjs): each chat is in one, which gives its prompt, thinking, sampling, tools and skills. */
+export type ChatProfileId = 'chat' | 'code' | 'rp';
+export const CHAT_PROFILE_IDS: ChatProfileId[] = ['chat', 'code', 'rp'];
+export type ProfileSampling = { temperature: number | null; top_p: number | null; top_k: number | null; min_p: number | null; presence_penalty: number | null; repetition_penalty: number | null };
+export interface ChatProfile {
+  id: ChatProfileId; name: string; systemPrompt: string; promptPlacement: 'add' | 'replace'; effort: 'Medium' | 'High'; thinkingBudget: number;
+  agent: boolean; mode: 'manual' | 'plan' | 'bypass'; sampling: ProfileSampling; maxTokens: number | null; historyLimit: number;
+  tools: { groups: Record<string, boolean>; connected: boolean }; skills: { all: boolean; allow: string[] };
+}
+export interface ToolGroupInfo { id: string; area: string; name: string; about: string }
+export interface ProfilesState { profiles: Record<ChatProfileId, ChatProfile>; toolGroups: ToolGroupInfo[] }
+/** The one model the app runs on when the launcher pins it (server/pinned-model.mjs). */
+export interface PinnedModelState { enabled: boolean; phase: 'off' | 'checking' | 'starting' | 'ready' | 'error'; name: string | null; modelId: string | null; connectionId: string | null; error: string | null; context: number | null }
 export interface ModelConnectionDraft {
   id?: string; kind: 'provider' | 'custom'; provider: string | null; name: string;
   baseUrl: string; protocol: ModelProtocol; apiKey: string; clearKey?: boolean; models: ApiModel[];
@@ -464,6 +477,8 @@ export interface LoopRecord {
 }
 
 export interface Session {
+  /** The profile this chat belongs to (Chat, Code, RP); a chat from before profiles is a Chat. */
+  profile?: ChatProfileId;
   /** The person dismissed this chat's (or its loop's) card on the board at this time. A later problem brings it back. */
   ackedAt?: string;
   loop?: LoopRecord;

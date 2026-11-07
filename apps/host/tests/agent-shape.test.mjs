@@ -45,9 +45,16 @@ test('the profile adds a response-settings copy of each shapeable route (local, 
     proxyBase: 'http://127.0.0.1:8791/api/internal/agent-llm',
   });
   const local = profile.routes.find(r => r.kind === 'local');
-  assert.deepEqual(Object.keys(local.shaped), ['0', '2048', '8192', '32768']);
+  assert.deepEqual(Object.keys(local.shaped), ['0', '2048', '8192', '32768', 'profiles']);
   assert.equal(local.shaped[8192], 'strata-local~s8192');
-  assert.deepEqual(Object.keys(profile.shapeTargets).sort(), [...Object.values(local.shaped), ...Object.values(profile.routes.find(r => r.connectionId === 'lan').shaped)].sort());
+  // One more copy per budget for each chat profile (Chat, Code, RP), marked with the x-strata-profile header.
+  assert.deepEqual(Object.keys(local.shaped.profiles), ['chat', 'code', 'rp']);
+  assert.equal(local.shaped.profiles.code[8192], 'strata-local~s8192~code');
+  const keysOf = shaped => [...['0', '2048', '8192', '32768'].map(b => shaped[b]), ...Object.values(shaped.profiles).flatMap(p => Object.values(p))];
+  assert.deepEqual(Object.keys(profile.shapeTargets).sort(), [...keysOf(local.shaped), ...keysOf(profile.routes.find(r => r.connectionId === 'lan').shaped)].sort());
+  const docProviders = JSON.parse(profile.patch.slice(profile.patch.indexOf('['))).find(e => e.id === 'llm-pi-ai').config.providers;
+  assert.equal(docProviders['strata-local~s0~rp'].headers['x-strata-profile'], 'rp');
+  assert.equal(docProviders['strata-local~s2048~rp'].headers['x-strata-budget'], '2048');
   assert.equal(profile.shapeTargets['strata-local~s0'], 'http://127.0.0.1:9001');
   assert.equal(profile.routes.find(r => r.connectionId === 'cloud').shaped, undefined);
   const doc = JSON.parse(profile.patch.slice(profile.patch.indexOf('[')));

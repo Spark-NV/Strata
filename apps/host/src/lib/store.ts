@@ -53,6 +53,10 @@ import type {
   ModelProviders,
   ModelConnectionDraft,
   RemoteModelSelection,
+  ChatProfile,
+  ChatProfileId,
+  PinnedModelState,
+  ProfilesState,
   MonitorState,
   ServingState,
   Session,
@@ -108,13 +112,17 @@ export interface AppState {
   shareTelemetry: boolean;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
-  settingsSection: 'Appearance' | 'Models' | 'Tools' | 'Storage' | 'Engine' | 'About';
+  settingsSection: 'Appearance' | 'Models' | 'Profiles' | 'Tools' | 'Storage' | 'Engine' | 'About';
   hardware: Hardware | null;
   library: ModelLibrary | null;
   imageModels: ImageModelLibrary | null;
   runtime: RuntimeModels | null;
   providers: ModelProviders | null;
   remoteModel: RemoteModelSelection | null;
+  /** The one model every chat runs on, when the launcher pins it (server/pinned-model.mjs). */
+  pinned: PinnedModelState | null;
+  /** The chat profiles and the tool groups their settings switch (server/profiles.mjs). */
+  profiles: ProfilesState | null;
   engine: EngineConfig | null;
   serving: ServingState | null;
   monitor: MonitorState | null;
@@ -321,6 +329,8 @@ let state: AppState = {
   providers: null,
   /** The open chat's API model, or null for the local model (the default for every chat). */
   remoteModel: null,
+  pinned: null,
+  profiles: null,
   engine: null,
   serving: null,
   monitor: null,
@@ -359,7 +369,7 @@ function set(patch: Partial<AppState> | ((s: AppState) => Partial<AppState>)) {
   state = { ...state, ...next };
   // Opening another chat shows that chat's model choice and whether that chat is mid-turn.
   if (state.activeSession !== before) {
-    const chosen = state.sessions.find(s => s.id === state.activeSession)?.preferences?.remoteModel ?? null;
+    const chosen = pinnedSelection() ?? state.sessions.find(s => s.id === state.activeSession)?.preferences?.remoteModel ?? null;
     state = { ...state, remoteModel: 'remoteModel' in next ? state.remoteModel : chosen, streaming: !!state.activeSession && liveTurns.has(state.activeSession) };
   }
   for (const l of listeners) l();
@@ -384,6 +394,30 @@ export function setConfigDraft(configDraft: string | null) {
 
 export function setNavOpen(navOpen: boolean) { set({ navOpen }); }
 export function setSettingsSection(settingsSection: AppState['settingsSection']) { set({ settingsSection }); }
+
+/** The pinned model as a chat's model choice, or null when nothing is pinned (or it is not found yet). */
+export function pinnedSelection(): RemoteModelSelection | null {
+  const p = state.pinned;
+  return p?.enabled && p.connectionId && p.modelId ? { connectionId: p.connectionId, modelId: p.modelId } : null;
+}
+function applyPinned(pinned: PinnedModelState) {
+  const selection = pinned.enabled && pinned.connectionId && pinned.modelId ? { connectionId: pinned.connectionId, modelId: pinned.modelId } : null;
+  set({ pinned, ...(selection ? { remoteModel: selection } : {}) });
+}
+/** The profile a chat is in (a chat from before profiles is a Chat). */
+export function profileOf(session: Session | undefined | null): ChatProfileId {
+  return session?.profile === 'code' || session?.profile === 'rp' ? session.profile : 'chat';
+}
+export async function saveProfile(profile: ChatProfile) {
+  const saved = await api.put<{ profile: ChatProfile }>(`/api/profiles/${profile.id}`, profile);
+  if (state.profiles) set({ profiles: { ...state.profiles, profiles: { ...state.profiles.profiles, [profile.id]: saved.profile } } });
+  return saved.profile;
+}
+export async function resetProfile(id: ChatProfileId) {
+  const saved = await api.post<{ profile: ChatProfile }>(`/api/profiles/${id}/reset`, {});
+  if (state.profiles) set({ profiles: { ...state.profiles, profiles: { ...state.profiles.profiles, [id]: saved.profile } } });
+  return saved.profile;
+}
 
 /** Choose the open chat's model: an API model, or null for the local one. Other chats keep theirs. */
 export function selectRemoteModel(remoteModel: RemoteModelSelection | null) {
@@ -835,6 +869,12 @@ function applyEvent(e: StreamEvent) {
     case 'providers':
       applyProviders(data as unknown as ModelProviders);
       break;
+    case 'pinned':
+      applyPinned(data as unknown as PinnedModelState);
+      break;
+    case 'profiles':
+      if (state.profiles) set({ profiles: { ...state.profiles, profiles: data as unknown as ProfilesState['profiles'] } });
+      break;
     case 'goal':
       if (typeof data.chatId === 'string') applyGoalFrame(data.chatId, data.goal);
       break;
@@ -916,6 +956,8 @@ export async function bootstrap() {
       monitor: soft<MonitorState>('/api/monitor'),
       skills: soft<Skill[]>('/api/skills'),
       providers: soft<ModelProviders>('/api/model-providers'),
+      pinned: soft<PinnedModelState>('/api/pinned'),
+      profiles: soft<ProfilesState>('/api/profiles'),
       imageModels: soft<ImageModelLibrary>('/api/image-models'),
       runtime: soft<RuntimeModels>('/api/runtime'),
     };
@@ -941,6 +983,8 @@ export async function bootstrap() {
     void late.monitor.then(monitor => { if (monitor) set({ monitor }); });
     void late.skills.then(skills => { if (skills) set({ skills }); });
     void late.providers.then(providers => { if (providers) applyProviders(providers); });
+    void late.pinned.then(pinned => { if (pinned) applyPinned(pinned); });
+    void late.profiles.then(profiles => { if (profiles) set({ profiles }); });
     void late.imageModels.then(imageModels => { if (imageModels) set({ imageModels }); });
     void late.runtime.then(runtime => { if (runtime) set({ runtime }); });
     if (!shellAnnounced) { shellAnnounced = true; void announcePortNotice(); rememberShellLanguage(state.language); }
@@ -1349,9 +1393,13 @@ async function syncChatsFromHost() {
   sessionWriter.enable();
 }
 
-export function newSession(): Session {
+export function newSession(profileId: ChatProfileId = 'chat'): Session {
+  // A new chat starts with its profile's thinking level, approval mode and tools switch, on the pinned model when there is one.
+  const profile = state.profiles?.profiles[profileId];
+  const pinned = pinnedSelection();
   const session: Session = {
     id: uid('s'),
+    profile: profileId,
     title: 'New conversation',
     defaultTitle: true,
     createdAt: new Date().toISOString(),
@@ -1360,7 +1408,8 @@ export function newSession(): Session {
     workspace: state.workspaces.find(w => w.id === state.activeWorkspace)?.path ?? state.workspacePath,
     tokensIn: 0,
     tokensOut: 0,
-    ...(state.activeSession === null && state.remoteModel ? { preferences: { remoteModel: state.remoteModel } } : {}),
+    ...(pinned || profile ? { preferences: { ...(pinned ? { remoteModel: pinned } : {}), ...(profile ? { thinking: profile.effort, mode: profile.mode, agent: profile.agent } : {}) } }
+      : state.activeSession === null && state.remoteModel ? { preferences: { remoteModel: state.remoteModel } } : {}),
   };
   const sessions = [session, ...state.sessions];
   persistSessions(sessions);
@@ -2059,7 +2108,8 @@ export async function sendMessage(text: string, options: { fromLoop?: boolean; g
         ...(resume ? { goalAction: 'resume' } : planStart ? {} : { message: options.shown ? body : body }),
         history:await Promise.all(prior.map(async(m,index)=>{const included=pictureCheck.ok?(m.photos??[]).filter((_,p)=>imageSlots.has(`${index}:${p}`)):[];const omitted=(m.photos??[]).filter(p=>!included.includes(p));const text=m.content+(omitted.length?`\n[Earlier pictures: ${omitted.map(p=>p.name).join(', ')}. Their pixels are outside this model's image context; ask to reattach them if needed.]`:'');return {role:m.role,content:included.length?[{type:'text',text},...await Promise.all(included.map(async photo=>({type:'image_url',image_url:{url:(await photoData(photo)).url}})))]:text};})),
         model: state.library?.loaded ?? state.library?.current ?? null,
-        remoteModel: state.remoteModel,
+        remoteModel: pinnedSelection() ?? state.remoteModel,
+        profile: profileOf(state.sessions.find(s=>s.id===sessionId)),
         nativeModelId:nativeState()?.instances.length?nativeState()?.defaultId:undefined,
         ...(pictures.length ? { imageIds: await uploadChatPhotos(pictures, sessionId) } : {}),
         useTools:state.sessions.find(s=>s.id===sessionId)?.preferences?.useTools===true,

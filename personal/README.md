@@ -101,3 +101,23 @@ to 49,152 tokens and keeps 16,384 for its answer. Typing `<|think_medium|>` in
 a message switches to medium from that message on, `<|think_xhigh|>` switches
 back, `<|think_low|>` and `<|think_off|>` also work; the template removes the
 tag before the model sees it.
+
+## The desktop app (`strata-app`)
+
+`~/.local/bin/strata-app` (a copy is `personal/strata-app`, and the app menu's "Strata (desktop app)"
+starts it) runs the window and runtime of the 0.2.11 AppImage, unpacked in
+`~/Applications/strata-runtime/squashfs-root`, with this fork's app code: its `usr/lib/Strata/host`
+folder links `dist` and `server` to `apps/host`. After a change to the UI run `npm run build` in
+`apps/host`, then restart the app; a change to `apps/host/server` only needs the restart. The agent
+harness is the AppImage's own (`STRATA_HARNESS_DIR`). The app's data is in `~/.strata/data`.
+
+It is pinned to this machine's model (`apps/host/server/pinned-model.mjs`): `STRATA_PIN_BASE_URL`
+names the server, `STRATA_PIN_SERVICE` the unit it starts when the server does not answer (about a
+minute), and every chat runs on it; the model pickers and the Models screens are hidden.
+
+The sidebar has three profiles, Chat, Code and RP (`apps/host/server/profiles.mjs`), configured in
+Settings -> Profiles: system message, reasoning effort (Medium or Extra High), thinking budget,
+sampling, output cap, tools on or off, approval mode, which tool groups and connected tools, and which
+skills. A profile's tools and skills are left out of what the model is offered and refused by the
+approval gate if it asks for them anyway. `STRATA_PROFILE_DEBUG=<file>` logs, per agent request, the
+tools before and after the profile and the sampling sent.

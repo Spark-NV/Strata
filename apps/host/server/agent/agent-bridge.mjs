@@ -122,7 +122,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
  * @param {string} [options.nodePath]                   the Node runtime that runs the Harness
  * @param {(line:string)=>void} [options.log]
  */
-export function createAgentBridge({ dataDir, componentsDir = null, bundledDir = null, gate = true, localInstances, connections, tools = () => undefined, defaultLocalId = () => null, skillsDir = () => null, onGoal = () => {}, onPlan = () => {}, onQueue = () => {}, proxyBase = null, searchMock = null, expertSampling = () => null, engineProgress = () => null, engineGraceMs = 30 * 60_000, stallMs = 4 * 60_000, stallToolMs = 20 * 60_000, env = process.env, nodePath = process.execPath, log = () => {}, startTimeoutMs = 120_000, sessionReadyMs = 60_000, sessionRetryMs = 1_500 }) {
+export function createAgentBridge({ profilePolicyFile = null, bindProfile = () => {}, dataDir, componentsDir = null, bundledDir = null, gate = true, localInstances, connections, tools = () => undefined, defaultLocalId = () => null, skillsDir = () => null, onGoal = () => {}, onPlan = () => {}, onQueue = () => {}, proxyBase = null, searchMock = null, expertSampling = () => null, engineProgress = () => null, engineGraceMs = 30 * 60_000, stallMs = 4 * 60_000, stallToolMs = 20 * 60_000, env = process.env, nodePath = process.execPath, log = () => {}, startTimeoutMs = 120_000, sessionReadyMs = 60_000, sessionRetryMs = 1_500 }) {
   const root = join(dataDir, 'agent');
   const home = join(root, 'home');
   const sessionsFile = join(root, 'sessions.json');
@@ -182,7 +182,7 @@ export function createAgentBridge({ dataDir, componentsDir = null, bundledDir = 
   /** The agent's profile now, plus where its shaped routes really lead (read by the forwarding endpoint). */
   let shapeTargets = {};
   function buildProfileNow() {
-    const profile = buildProfile({ local: localInstances(), connections: connections(), gate, tools: tools(), skillsDir: skillsDir(), proxyBase, searchMock, defaultLocalId: defaultLocalId() });
+    const profile = buildProfile({ local: localInstances(), connections: connections(), gate, tools: tools(), skillsDir: skillsDir(), proxyBase, searchMock, defaultLocalId: defaultLocalId(), policyFile: profilePolicyFile });
     shapeTargets = profile.shapeTargets ?? {};
     return profile;
   }
@@ -363,7 +363,7 @@ export function createAgentBridge({ dataDir, componentsDir = null, bundledDir = 
     try { return await runTurnInner(c, options); } finally { c.starting = false; }
   }
 
-  async function runTurnInner(c, { chatId, message, workspacePath, choice = null, mode = null, history = [], onFrame, requestId = `req-${randomUUID()}`, signal, goal = null, thinking = null, thinkingBudget = 0, images = [], planTask = null, planRun = null, researchTopic = null }) {
+  async function runTurnInner(c, { chatId, message, workspacePath, choice = null, mode = null, history = [], onFrame, requestId = `req-${randomUUID()}`, signal, goal = null, thinking = null, thinkingBudget = 0, profile = null, images = [], planTask = null, planRun = null, researchTopic = null }) {
     let send = onFrame; let attached = true;
     // A research run gathers first; what the assistant writes while gathering is notes, not the answer, so it is not shown.
     let hideDeltas = !!researchTopic;
@@ -417,7 +417,11 @@ export function createAgentBridge({ dataDir, componentsDir = null, bundledDir = 
     // endpoint, on a copy of the route; with every setting at its default the route is used directly, as before.
     const budget = level === 'off' ? 0 : nearestBudget(thinkingBudget);
     const sampling = proxyBase && route.shaped ? expertSampling() : null;
-    const provider = route.shaped && (budget || sampling) ? route.shaped[budget] : route.route;
+    // A chat in a profile (Chat, Code, RP) always goes through the forwarding endpoint on that profile's copy of the route, and the
+    // approval gate learns which profile this Harness session is in (../profiles.mjs).
+    const profiled = profile && route.shaped?.profiles?.[profile] ? route.shaped.profiles[profile][budget] : null;
+    if (profile) bindProfile(sessionId, profile);
+    const provider = profiled ?? (route.shaped && (budget || sampling) ? route.shaped[budget] : route.route);
     const wanted = `${provider}/${route.modelId}/${level ?? ''}`;
     if (c.route !== wanted || c.routeGeneration !== runtime.generation) {
       const select = effort => runtime.gw.rpc('session/selectModel', { request: { sessionId, provider, model: route.modelId, ...(effort ? { reasoningEffort: effort } : {}) } });

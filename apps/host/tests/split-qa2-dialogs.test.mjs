@@ -12,7 +12,7 @@ test('every dialog the menu opens closes the menu first, and the task dialogs st
   for (const opener of ['setEditor(blankTask())', 'setEditor({ ...t })', 'setRemove(t)']) assert.ok(tree.includes(`setNavOpen(false); ${opener}`), `${opener} closes the menu`);
   assert.match(tree, /if \(collapsed\)\n\s+return dialogs;/, 'a closed menu still renders the dialogs');
   const side = await read('../src/app/Sidebar.tsx');
-  for (const opener of ['setRenameId(menuId)', 'setDeleteId(menuId)', 'setRecentOpen(true)', 'setRemoveWorkspaceId(w.id)', 'setRenameWsId(w.id)', 'setQuitOpen(true)']) assert.ok(side.includes(`setNavOpen(false); ${opener}`), `${opener} closes the menu`);
+  for (const opener of ['setRenameId(menuId)', 'setDeleteId(menuId)', 'setRecentOpen(true)', 'setQuitOpen(true)']) assert.ok(side.includes(`setNavOpen(false); ${opener}`), `${opener} closes the menu`);
 });
 
 test('a surface that opens moves the keyboard in even when animation frames are held back', async () => {

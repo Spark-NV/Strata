@@ -10,7 +10,9 @@
  * Only a local model, or an OpenAI-style server on this computer or this network, is shaped: a cloud service would reject fields it does not know.
  */
 
+import { appendFileSync } from 'node:fs';
 import http from 'node:http';
+import { applyProfileToAgentBody } from '../profiles.mjs';
 import https from 'node:https';
 
 /** The thinking budgets the composer offers (0 = no limit is not a budget). */
@@ -82,7 +84,7 @@ const HOP = new Set(['host', 'connection', 'content-length', 'transfer-encoding'
  * The forwarding endpoint. `targetOf(key)` gives the real base address of a shaped route (or null), `samplingNow()` the Expert fields that
  * differ from the defaults right now. Called for `/api/internal/agent-llm/<key>/<path>`; this computer's own address only.
  */
-export function createLlmProxy({ targetOf, samplingNow }) {
+export function createLlmProxy({ targetOf, samplingNow, profileOf = () => null }) {
   return function handle(req, res, key, rest) {
     const remote = req.socket?.remoteAddress ?? '';
     if (!/^(::1|127\.|::ffff:127\.)/.test(remote)) { res.writeHead(403, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'This endpoint is for the assistant on this computer only.' })); return; }
@@ -95,7 +97,15 @@ export function createLlmProxy({ targetOf, samplingNow }) {
       let body = Buffer.concat(chunks);
       const budget = nearestBudget(req.headers['x-strata-budget']);
       if (req.method === 'POST' && /\/chat\/completions\/?$/.test(rest) && body.length) {
-        try { body = Buffer.from(JSON.stringify(shapeBody(JSON.parse(body.toString('utf8')), { sampling: samplingNow(), budget }))); } catch { /* not JSON: pass it on untouched */ }
+        // A route marked with a chat profile (Chat, Code, RP) also gets that profile's prompt, sampling, tools and skills (../profiles.mjs).
+        const profile = req.headers['x-strata-profile'] ? profileOf(String(req.headers['x-strata-profile'])) : null;
+        try {
+          const parsed = JSON.parse(body.toString('utf8'));
+          const shaped = applyProfileToAgentBody(shapeBody(parsed, { sampling: samplingNow(), budget }), profile);
+          // STRATA_PROFILE_DEBUG=<file>: one line per request with the tools offered before and after the profile (for checking a profile's rules).
+          if (process.env.STRATA_PROFILE_DEBUG) { const names = b => (b.tools ?? []).map(t => t?.function?.name ?? t?.name); try { appendFileSync(process.env.STRATA_PROFILE_DEBUG, `${JSON.stringify({ at: new Date().toISOString(), profile: profile?.id ?? null, before: names(parsed), after: names(shaped), system: String(shaped.messages?.find(m => m.role === 'system')?.content ?? '').slice(-300), sampling: Object.fromEntries(['temperature', 'top_p', 'top_k', 'min_p', 'presence_penalty', 'reasoning_budget_tokens', 'max_tokens'].filter(k => shaped[k] !== undefined).map(k => [k, shaped[k]])) })}\n`); } catch { /* debug only */ } }
+          body = Buffer.from(JSON.stringify(shaped));
+        } catch { /* not JSON: pass it on untouched */ }
       }
       // The route's address is the model's own base (it ends in /v1): the assistant's /v1 is that same prefix.
       const target = new URL(base.replace(/\/+$/, '') + rest.replace(/^\/v1(?=\/|$|\?)/, ''));

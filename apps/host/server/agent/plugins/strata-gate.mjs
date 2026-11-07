@@ -1,5 +1,6 @@
 /**
- * The Strata approval gate: a small Harness plugin (plain ESM, no imports, loaded by absolute path from the profile).
+ * The Strata approval gate: a small Harness plugin (plain ESM, loaded by absolute path from the profile; its one import is the host's
+ * pure profiles module, for the per-profile tool and skill rules).
  *
  * Why it exists. The Harness only asks a person when a tool escalates its sandbox. With the sandbox read-only that
  * produced a blocked attempt first (a card full of sandbox and PowerShell errors) and the real Approve/Deny card
@@ -20,6 +21,7 @@
  * The status command `/strata-gate` lets the host confirm the gate is really loaded before it lets a Manual turn
  * start (a Manual chat with no gate would be a chat with the sandbox open and nobody asking).
  */
+import { policyReader, skillAllowed, toolAllowed } from '../../profiles.mjs';
 
 export const name = 'strata-gate';
 export const inject = ['approval', 'permissionPresets', 'sessions', 'tools'];
@@ -416,9 +418,19 @@ export function apply(ctx, config = {}) {
     return ctx.permissionPresets.current(session);
   };
 
+  // The chat's profile (Chat, Code, RP) decides which tools and skills exist for it at all, in every mode: a tool or skill outside it is
+  // refused here even when the model names it anyway (the forwarding endpoint already leaves them out of what the model is offered).
+  const profileOf = config.policyFile ? policyReader(config.policyFile) : () => null;
   ctx.on('tools/pre-execute', async (exec, next) => {
     const agent = exec.agent;
-    if (!agent || exec.name === 'run_code') return next();
+    if (!agent) return next();
+    const profile = profileOf(chatOf(agent.session));
+    if (profile) {
+      const args = exec.arguments && typeof exec.arguments === 'object' ? exec.arguments : {};
+      if (!toolAllowed(profile, exec.name)) return { kind: 'deny', reason: `The ${profile.name} profile does not allow the ${exec.name} tool. Go on without it and say so if it matters.` };
+      if (exec.name === 'skill' && !skillAllowed(profile, args.name)) return { kind: 'deny', reason: `The ${profile.name} profile does not allow the skill "${args.name}". Go on without it.` };
+    }
+    if (exec.name === 'run_code') return next();
     // Fail closed (T4): a session whose preset cannot be read (a reset in progress, a helper whose chat is gone) is treated as Manual, so
     // anything this file cannot prove is read-only still asks. It used to run unasked.
     let preset;

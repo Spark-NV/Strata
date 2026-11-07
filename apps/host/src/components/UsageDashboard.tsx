@@ -12,6 +12,8 @@ export function UsageDashboard({ loaded }: {
     loaded: boolean;
 }) {
     const native = useNative(), remoteModel = useStore(s => s.remoteModel);
+    // With a pinned model there is nothing to choose: the app starts it itself.
+    const pinnedOn = useStore(s => s.pinned?.enabled === true);
     const canChat = loaded || !!remoteModel || !!native?.instances.some(i => i.id === native.defaultId && i.status === 'ready');
     const sessions = useStore(s => s.sessions), library = useStore(s => s.library);
     const [tab, setTab] = useState<'overview' | 'models'>('overview'), [period, setPeriod] = useState<UsagePeriod>('all'), [expanded, setExpanded] = useState(false);
@@ -75,6 +77,6 @@ export function UsageDashboard({ loaded }: {
         </>)}
       </div>
     </div>
-    {tr(!canChat ? <Btn variant="primary" onClick={() => go('models')}>{tr("Choose a model")}</Btn> : null)}
+    {tr(!canChat && !pinnedOn ? <Btn variant="primary" onClick={() => go('models')}>{tr("Choose a model")}</Btn> : null)}
   </section>;
 }

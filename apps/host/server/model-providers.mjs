@@ -143,10 +143,10 @@ export function createModelProviders({ directory, changed = () => {}, fetchImpl 
     const models = [...new Map(rows.filter(m => text(m.id, 256)).map(m => [m.id, { id: text(m.id, 256), name: text(m.display_name ?? m.name) || text(m.id, 256), contextMax: numeric(m.context_length ?? m.max_context_length ?? m.context_window), maxOutput: numeric(m.max_output_tokens ?? m.max_completion_tokens ?? m.top_provider?.max_completion_tokens), vision: modelReadsPictures(m), reasoning: modelSupportsReasoning(m) }])).values()];
     return { models: models.sort((a, b) => a.name.localeCompare(b.name)) };
   }
-  async function stream({ selection, message, history = [], systemPrompt = '', images = [], thinking, signal, onFrame }) {
+  async function stream({ selection, message, history = [], systemPrompt = '', images = [], thinking, signal, onFrame, extra = {}, historyLimit = 40 }) {
     const { connection, model } = resolve(selection);
     const started = Date.now();
-    const messages = history.filter(m => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string').slice(-40).map(m => ({ role: m.role, content: m.content }));
+    const messages = history.filter(m => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string').slice(historyLimit > 0 ? -historyLimit : 0).map(m => ({ role: m.role, content: m.content }));
     // Pictures only go to OpenAI-style servers (the one protocol every local server shares); other protocols keep the text.
     const pics = connection.protocol === 'openai-chat' ? images : [];
     messages.push({ role: 'user', content: pics.length ? [{ type: 'text', text: message }, ...pics.map(i => ({ type: 'image_url', image_url: { url: i.url } }))] : message });
@@ -162,7 +162,9 @@ export function createModelProviders({ directory, changed = () => {}, fetchImpl 
       if (isOpenRouter(connection)) payload.reasoning = { effort: OPENROUTER_EFFORTS[choice] };
       else payload.reasoning_effort = ({ off: 'none', max: 'high' })[choice] ?? choice;
     }
-    const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(10 * 60 * 1000)]) : AbortSignal.timeout(10 * 60 * 1000);
+    // A chat profile's sampling, output cap and thinking budget (only OpenAI-style servers: other protocols would refuse the fields).
+    if (protocol === 'openai-chat') Object.assign(payload, extra);
+    const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(30 * 60 * 1000)]) : AbortSignal.timeout(30 * 60 * 1000);
     const res = await request(connection, protocol === 'anthropic' ? 'messages' : protocol === 'openai-responses' ? 'responses' : 'chat/completions', { method: 'POST', body: JSON.stringify(payload), signal: requestSignal });
     if (!res.body) fail('The model API returned an empty response.');
     onFrame({ type: 'start', model: model.name, contextMax: model.contextMax, demo: false });
