@@ -7612,3 +7612,55 @@ html[data-motion='reduced'] .native-progress__bar[data-indeterminate] > i { anim
 /* The profile groups (Chat, Code, RP): their new-chat button is always shown, not only on hover. */
 .ws__row > .ws__new { opacity: 1; color: var(--st-ink-muted); }
 .ws__row > .ws__new:hover { color: var(--st-ink); }
+
+/* ---- Roleplay (Spark fork): the library screen, RP chats, lorebook editor ---- */
+.rp-screen { padding: 24px clamp(16px, 4vw, 40px); max-width: 1200px; margin: 0 auto; width: 100%; overflow-y: auto; height: 100%; }
+.rp-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 50%; overflow: hidden; background: var(--st-surface-2); color: var(--st-ink-soft); font-weight: 600; border: 1px solid var(--st-line-soft); }
+.rp-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.rp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+.rp-card { display: flex; flex-direction: column; border: 1px solid var(--st-line); border-radius: var(--st-r-lg); background: var(--st-surface); overflow: hidden; }
+.rp-card[data-picked] { border-color: var(--st-accent); box-shadow: 0 0 0 2px var(--st-accent-tint); }
+.rp-card__main { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 0 0 8px; background: none; border: 0; color: inherit; cursor: pointer; font: inherit; }
+.rp-card__img { aspect-ratio: 2 / 3; width: 100%; background: var(--st-surface-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.rp-card__img img { width: 100%; height: 100%; object-fit: cover; }
+.rp-card__name { font-weight: 600; padding: 4px 10px 0; }
+.rp-card__desc { padding: 0 10px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.rp-card__actions { display: flex; align-items: center; gap: 4px; padding: 4px 8px 8px; margin-top: auto; }
+.rp-card__actions label { margin-right: auto; }
+.rp-groupbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--st-r-md); background: var(--st-accent-tint); }
+.rp-empty { padding: 32px 16px; text-align: center; color: var(--st-ink-muted); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.rp-row { padding: 10px 14px; border-bottom: 1px solid var(--st-line-soft); }
+.rp-row:last-child { border-bottom: 0; }
+.rp-editor textarea, .rp-entry textarea { resize: vertical; }
+.rp-bar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; margin-bottom: 14px; border: 1px solid var(--st-line); border-radius: var(--st-r-lg); background: var(--st-surface); }
+.rp-bar__cast, .rp-bar__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rp-bar__member { display: inline-flex; align-items: center; gap: 8px; padding: 2px 8px 2px 2px; border-radius: var(--st-r-pill); border: 1px solid transparent; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+.rp-bar__member:not(:disabled):hover { border-color: var(--st-line); background: var(--st-surface-2); }
+.rp-bar__member:disabled { cursor: default; opacity: 1; }
+.rp-bar__member[data-muted] { opacity: .45; }
+.rp-msg { display: flex; gap: 12px; padding: 10px 0; align-items: flex-start; }
+.rp-msg + .rp-msg { border-top: 1px solid var(--st-line-soft); }
+.rp-msg--hidden { opacity: .5; }
+.rp-msg__body { flex: 1; min-width: 0; }
+.rp-msg__head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.rp-msg__actions { margin-left: auto; display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--st-t-micro) var(--st-ease-standard); }
+.rp-msg:hover .rp-msg__actions, .rp-msg:focus-within .rp-msg__actions { opacity: 1; }
+.rp-msg--user .rp-msg__text { color: var(--st-ink-soft); }
+.rp-msg__text em { color: var(--st-ink-soft); }
+.rp-edit { display: flex; flex-direction: column; gap: 8px; }
+.rp-edit textarea { width: 100%; }
+.rp-swipes { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.rp-swipes > button:first-child svg { transform: rotate(90deg); }
+.rp-swipes > button:last-child svg { transform: rotate(-90deg); }
+.rp-bar__tools > :first-child { max-width: 220px; }
+.rp-entry { border: 1px solid var(--st-line); border-radius: var(--st-r-md); background: var(--st-surface); }
+.rp-entry[data-off] { opacity: .6; }
+.rp-entry > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; }
+.rp-entry > summary::-webkit-details-marker { display: none; }
+.rp-entry__title { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-entry__body { border-top: 1px solid var(--st-line-soft); }
+.rp-inspect { border: 1px solid var(--st-line-soft); border-radius: var(--st-r-sm); padding: 6px 10px; }
+.rp-inspect > summary { cursor: pointer; }
+/* Long text (prompts, descriptions, lore) gets the whole row under its label in the fork's editors. */
+.settings-body .field:has(.field__control--wide textarea), .rp-editor .field:has(.field__control--wide), .rp-entry .field:has(.field__control--wide), .dialog-body .field:has(.field__control--wide textarea) { flex-direction: column; align-items: stretch; gap: 10px; }
+.settings-body .field:has(.field__control--wide textarea) .field__control--wide, .rp-editor .field__control--wide, .rp-entry .field__control--wide, .dialog-body .field:has(.field__control--wide textarea) .field__control--wide { width: 100%; justify-content: stretch; }

@@ -138,12 +138,22 @@ export interface RemoteModelSelection { connectionId: string; modelId: string }
 /** The chat profiles (server/profiles.mjs): each chat is in one, which gives its prompt, thinking, sampling, tools and skills. */
 export type ChatProfileId = 'chat' | 'code' | 'rp';
 export const CHAT_PROFILE_IDS: ChatProfileId[] = ['chat', 'code', 'rp'];
-export type ProfileSampling = { temperature: number | null; top_p: number | null; top_k: number | null; min_p: number | null; presence_penalty: number | null; repetition_penalty: number | null };
+export type ProfileSampling = { temperature: number | null; top_p: number | null; top_k: number | null; min_p: number | null; presence_penalty: number | null; frequency_penalty: number | null; repetition_penalty: number | null; seed: number | null };
 export interface ChatProfile {
   id: ChatProfileId; name: string; systemPrompt: string; promptPlacement: 'add' | 'replace'; effort: 'Medium' | 'High'; thinkingBudget: number;
   agent: boolean; mode: 'manual' | 'plan' | 'bypass'; sampling: ProfileSampling; maxTokens: number | null; historyLimit: number;
   tools: { groups: Record<string, boolean>; connected: boolean }; skills: { all: boolean; allow: string[] };
+  /** Memory across chats: read puts the saved memories in the prompt; write gives the agent its remember / forget tools. */
+  memory: { read: boolean; write: boolean };
+  /** Web search and pages in Manual mode without the once-per-chat question. */
+  webWithoutAsking: boolean;
+  /** Named helpers the model can delegate to ("@name task" in the subagent tool); tools: groups or tool names, null for all. */
+  agents: ProfileAgent[];
+  /** The person's own slash commands: /name text, where $ARGUMENTS in the prompt is the text. */
+  commands: ProfileCommand[];
 }
+export interface ProfileAgent { name: string; description: string; instructions: string; tools: string[] | null }
+export interface ProfileCommand { name: string; description: string; prompt: string }
 export interface ToolGroupInfo { id: string; area: string; name: string; about: string }
 export interface ProfilesState { profiles: Record<ChatProfileId, ChatProfile>; toolGroups: ToolGroupInfo[] }
 /** The one model the app runs on when the launcher pins it (server/pinned-model.mjs). */
@@ -335,6 +345,17 @@ export interface MonitorState {
 }
 
 export interface ChatMessage {
+  /** Roleplay: the other versions of this reply (swipes); `content` is swipes[swipeIndex]. */
+  swipes?: string[];
+  swipeIndex?: number;
+  /** Roleplay: the reasoning of each swipe, by index. */
+  swipeReasoning?: string[];
+  /** Roleplay: which character wrote this reply (a group chat has several). */
+  characterId?: string;
+  /** Roleplay: the speaker's name as shown (the persona for the person's messages). */
+  name?: string;
+  /** Roleplay: left out of the prompt (the message stays on screen). */
+  hidden?: boolean;
   /** Tool calls the model is writing right now (a file, a command): live data for the writing card; see ToolDraft. */
   drafts?: ToolDraft[];
   /** The person's message is written with Markdown (a task handover: bold headings and lists), so the bubble draws it as such. */
@@ -476,7 +497,49 @@ export interface LoopRecord {
   lastText?: string;
 }
 
+/** A roleplay chat's own setup (server/rp/): who is in it, who the person plays, its lorebooks, its author's note and its variables. */
+export interface RpChat {
+  characterIds: string[];
+  personaId?: string | null;
+  lorebookIds?: string[];
+  authorsNote?: RpAuthorsNote;
+  vars?: Record<string, string>;
+  /** Group members who do not speak on their own turn. */
+  muted?: string[];
+}
+export type RpRole = 'system' | 'user' | 'assistant';
+export interface RpAuthorsNote { text: string; depth: number; interval: number; role: RpRole; position: 'depth' | 'top' | 'bottom' }
+export interface RpEntry {
+  uid: number; comment: string; keys: string[]; secondaryKeys: string[]; selectiveLogic: 'and_any' | 'not_all' | 'not_any' | 'and_all';
+  content: string; constant: boolean; enabled: boolean; position: 'before_char' | 'after_char' | 'an_top' | 'an_bottom' | 'depth' | 'em_top' | 'em_bottom';
+  depth: number; role: RpRole; order: number; probability: number; caseSensitive: boolean | null; matchWholeWords: boolean | null;
+  scanDepth: number | null; excludeRecursion: boolean; preventRecursion: boolean; group: string; sticky: number; cooldown: number; delay: number;
+}
+export interface RpLorebook { id: string; name: string; description: string; scanDepth: number | null; tokenBudget: number | null; recursive: boolean; entries: RpEntry[] }
+export interface RpCharacter {
+  id: string; name: string; avatar: boolean; description: string; personality: string; scenario: string; firstMessage: string;
+  alternateGreetings: string[]; exampleDialogues: string; systemPrompt: string; postHistoryInstructions: string; creatorNotes: string;
+  creator: string; characterVersion: string; tags: string[]; talkativeness: number; favorite: boolean;
+  depthPrompt: { text: string; depth: number; role: RpRole }; book: RpLorebook | null; lorebookIds: string[]; createdAt: string; updatedAt: string;
+}
+export interface RpPersona { id: string; name: string; description: string; avatar: boolean; position: 'prompt' | 'depth' | 'none'; depth: number; role: RpRole; lorebookId: string | null }
+export interface RpCustomPrompt { id: string; name: string; role: RpRole; content: string; enabled: boolean; depth: number | null }
+export interface RpReplacement { id: string; name: string; find: string; replace: string; flags: string; on: 'output' | 'input' | 'both'; enabled: boolean }
+export interface RpSettings {
+  userName: string; mainPrompt: string; auxiliaryPrompt: string; postHistoryPrompt: string; preferCharPrompt: boolean; preferCharInstructions: boolean;
+  impersonationPrompt: string; continuePrompt: string; groupNudgePrompt: string; newChatPrompt: string; newGroupChatPrompt: string; newExampleChatPrompt: string;
+  examplesBehavior: 'gradual' | 'always' | 'disabled'; namesBehavior: 'groups' | 'always' | 'never'; squashSystem: boolean;
+  promptOrder: { id: string; enabled: boolean }[]; customPrompts: RpCustomPrompt[];
+  worldInfo: { scanDepth: number; budgetPercent: number; budgetCap: number; recursive: boolean; maxRecursion: number; caseSensitive: boolean; matchWholeWords: boolean; includeNames: boolean; globalBooks: string[] };
+  authorsNote: RpAuthorsNote; contextLimit: number; responseReserve: number; autoStops: boolean; customStops: string[]; trimIncomplete: boolean;
+  replacements: RpReplacement[]; group: { strategy: 'natural' | 'list' | 'random' | 'manual'; allowSelfResponses: boolean; cards: 'speaker' | 'all' };
+  defaultPersonaId: string | null;
+}
+export interface RpLibrary { characters: RpCharacter[]; personas: RpPersona[]; lorebooks: RpLorebook[]; settings: RpSettings }
+
 export interface Session {
+  /** Roleplay chats: the characters, persona, lorebooks and author's note (absent: an ordinary chat). */
+  rp?: RpChat;
   /** The profile this chat belongs to (Chat, Code, RP); a chat from before profiles is a Chat. */
   profile?: ChatProfileId;
   /** The person dismissed this chat's (or its loop's) card on the board at this time. A later problem brings it back. */

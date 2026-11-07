@@ -143,19 +143,20 @@ export function createModelProviders({ directory, changed = () => {}, fetchImpl 
     const models = [...new Map(rows.filter(m => text(m.id, 256)).map(m => [m.id, { id: text(m.id, 256), name: text(m.display_name ?? m.name) || text(m.id, 256), contextMax: numeric(m.context_length ?? m.max_context_length ?? m.context_window), maxOutput: numeric(m.max_output_tokens ?? m.max_completion_tokens ?? m.top_provider?.max_completion_tokens), vision: modelReadsPictures(m), reasoning: modelSupportsReasoning(m) }])).values()];
     return { models: models.sort((a, b) => a.name.localeCompare(b.name)) };
   }
-  async function stream({ selection, message, history = [], systemPrompt = '', images = [], thinking, signal, onFrame, extra = {}, historyLimit = 40 }) {
+  async function stream({ selection, message, history = [], systemPrompt = '', images = [], thinking, signal, onFrame, extra = {}, historyLimit = 40, prompt = null }) {
     const { connection, model } = resolve(selection);
     const started = Date.now();
-    const messages = history.filter(m => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string').slice(historyLimit > 0 ? -historyLimit : 0).map(m => ({ role: m.role, content: m.content }));
+    // `prompt`: a whole message list built by the caller (the roleplay prompt), sent as it is.
+    const messages = prompt ? [] : history.filter(m => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string').slice(historyLimit > 0 ? -historyLimit : 0).map(m => ({ role: m.role, content: m.content }));
     // Pictures only go to OpenAI-style servers (the one protocol every local server shares); other protocols keep the text.
     const pics = connection.protocol === 'openai-chat' ? images : [];
-    messages.push({ role: 'user', content: pics.length ? [{ type: 'text', text: message }, ...pics.map(i => ({ type: 'image_url', image_url: { url: i.url } }))] : message });
+    if (!prompt) messages.push({ role: 'user', content: pics.length ? [{ type: 'text', text: message }, ...pics.map(i => ({ type: 'image_url', image_url: { url: i.url } }))] : message });
     const protocol = connection.protocol;
     const payload = protocol === 'anthropic'
       ? { model: model.id, messages, system: systemPrompt, max_tokens: 8192, stream: true }
       : protocol === 'openai-responses'
         ? { model: model.id, input: messages, instructions: systemPrompt, stream: true, store: false }
-        : { model: model.id, messages: [...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []), ...messages], stream: true, ...(['openai', 'deepseek', 'openrouter', 'google', 'moonshotai'].includes(connection.provider) ? { stream_options: { include_usage: true } } : {}) };
+        : { model: model.id, messages: prompt ?? [...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []), ...messages], stream: true, ...(['openai', 'deepseek', 'openrouter', 'google', 'moonshotai'].includes(connection.provider) ? { stream_options: { include_usage: true } } : {}) };
     // Match the native composer's effort names. Unknown support and other protocols keep provider defaults.
     const choice = typeof thinking === 'string' ? thinking.toLowerCase() : '';
     if (protocol === 'openai-chat' && (model.reasoning ?? knownThinks(connection, model.id)) === true && ['off', 'low', 'medium', 'high', 'max'].includes(choice)) {

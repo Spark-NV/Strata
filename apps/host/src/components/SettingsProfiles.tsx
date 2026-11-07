@@ -20,7 +20,9 @@ const SAMPLING: { key: keyof ProfileSampling; label: string; hint: string; step:
   { key: 'top_k', label: 'Top K', hint: 'Only pick from this many of the most likely words (1 to 64). Empty: 20.', step: 1, min: 1, max: 64 },
   { key: 'min_p', label: 'Min P', hint: 'Leave out words much less likely than the best one. Empty: off.', step: 0.01, min: 0, max: 1 },
   { key: 'presence_penalty', label: 'Presence penalty', hint: 'A nudge away from words already used. It also makes replies a little slower. Empty: off.', step: 0.05, min: 0, max: 2 },
+  { key: 'frequency_penalty', label: 'Frequency penalty', hint: 'A nudge away from words in proportion to how often they were used. Empty: off.', step: 0.05, min: 0, max: 2 },
   { key: 'repetition_penalty', label: 'Repetition penalty', hint: 'Makes repeating the same words less likely. Empty: off (1.0).', step: 0.01, min: 0.5, max: 2 },
+  { key: 'seed', label: 'Seed', hint: 'The same seed and message give the same reply. Empty: a new one each time.', step: 1, min: 0, max: 2147483647 },
 ];
 
 function NumberInput({ value, onChange, step, min, max, placeholder, label }: { value: number | null; onChange: (v: number | null) => void; step: number; min: number; max: number; placeholder: string; label: string }) {
@@ -143,6 +145,46 @@ export function SettingsProfiles() {
           <button className="st-toggle" role="switch" aria-checked={draft.skills.allow.includes(sk.name)} aria-label={sk.name} onClick={() => toggleSkill(sk.name, !draft.skills.allow.includes(sk.name))} />
         </Field>) : <p className="small muted" style={{ padding: '12px 16px' }}>{tr('No skills yet. Add them on the Skills page.')}</p>) : null}
       </div>
+    </section>
+
+    <section className="settings-section">
+      <h2 className="h4" style={{ marginBottom: 10 }}>{tr('Memory and web')}</h2>
+      <div className="st-card st-card--flush">
+        <Field label={tr('Use memory')} hint={tr('Your saved memories (Settings → Memory) are given to the model in this profile.')}>
+          <button className="st-toggle" role="switch" aria-checked={draft.memory.read} aria-label={tr('Use memory')} onClick={() => patch({ memory: { ...draft.memory, read: !draft.memory.read } })} />
+        </Field>
+        <Field label={tr('Save to memory')} hint={tr('The assistant may save and forget memories itself when you tell it something lasting or ask it to remember. Needs tools on.')}>
+          <button className="st-toggle" role="switch" aria-checked={draft.memory.write} aria-label={tr('Save to memory')} disabled={!draft.agent} onClick={() => patch({ memory: { ...draft.memory, write: !draft.memory.write } })} />
+        </Field>
+        <Field label={tr('Search the web without asking')} hint={tr('In Manual mode, web searches and pages run without the once-per-chat question.')}>
+          <button className="st-toggle" role="switch" aria-checked={draft.webWithoutAsking} aria-label={tr('Search the web without asking')} disabled={!draft.agent} onClick={() => patch({ webWithoutAsking: !draft.webWithoutAsking })} />
+        </Field>
+      </div>
+    </section>
+
+    <section className="settings-section">
+      <h2 className="h4" style={{ marginBottom: 6 }}>{tr('Agents')}</h2>
+      <p className="small muted" style={{ marginBottom: 10 }}>{tr('Specialists the assistant can hand work to with its helper tool. It is told their names and what they are for; a helper started as “@name …” gets that agent’s instructions and only its tools. Needs Helpers on.')}</p>
+      {draft.agents.map((a, i) => <div key={i} className="st-card st-card--flush" style={{ marginBottom: 8 }}>
+        <Field label={tr('Name')} hint={tr('Lowercase, used as @name.')}><div className="row" style={{ gap: 8 }}><input className="st-input" style={{ width: 180 }} value={a.name} onChange={e => patch({ agents: draft.agents.map((x, j) => (j === i ? { ...x, name: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') } : x)) })} /><Btn size="sm" variant="ghost" icon="trash" onClick={() => patch({ agents: draft.agents.filter((_, j) => j !== i) })}>{tr('Remove')}</Btn></div></Field>
+        <Field label={tr('What it is for')} wide><input className="st-input" style={{ width: '100%' }} value={a.description} onChange={e => patch({ agents: draft.agents.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)) })} /></Field>
+        <Field label={tr('Instructions')} wide><textarea className="st-input" rows={5} style={{ width: '100%' }} value={a.instructions} onChange={e => patch({ agents: draft.agents.map((x, j) => (j === i ? { ...x, instructions: e.target.value } : x)) })} /></Field>
+        <Field label={tr('Tools')} hint={tr('Tool groups or single tools, comma-separated (e.g. find, read, shell). Empty: every tool the profile has.')} wide>
+          <input className="st-input" style={{ width: '100%' }} defaultValue={(a.tools ?? []).join(', ')} onBlur={e => { const t = e.target.value.split(',').map(x => x.trim()).filter(Boolean); patch({ agents: draft.agents.map((x, j) => (j === i ? { ...x, tools: t.length ? t : null } : x)) }); }} />
+        </Field>
+      </div>)}
+      <Btn size="sm" icon="plus" onClick={() => patch({ agents: [...draft.agents, { name: 'helper', description: '', instructions: '', tools: null }] })}>{tr('Add an agent')}</Btn>
+    </section>
+
+    <section className="settings-section">
+      <h2 className="h4" style={{ marginBottom: 6 }}>{tr('Commands')}</h2>
+      <p className="small muted" style={{ marginBottom: 10 }}>{tr('Your own slash commands for this profile. Typing /name and some text sends the prompt with $ARGUMENTS replaced by the text (or the text added at the end).')}</p>
+      {draft.commands.map((c, i) => <div key={i} className="st-card st-card--flush" style={{ marginBottom: 8 }}>
+        <Field label={tr('Command')}><div className="row" style={{ gap: 8 }}><span className="small">/</span><input className="st-input" style={{ width: 160 }} value={c.name} onChange={e => patch({ commands: draft.commands.map((x, j) => (j === i ? { ...x, name: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') } : x)) })} /><Btn size="sm" variant="ghost" icon="trash" onClick={() => patch({ commands: draft.commands.filter((_, j) => j !== i) })}>{tr('Remove')}</Btn></div></Field>
+        <Field label={tr('Description')} wide><input className="st-input" style={{ width: '100%' }} value={c.description} onChange={e => patch({ commands: draft.commands.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)) })} /></Field>
+        <Field label={tr('Prompt')} wide><textarea className="st-input" rows={4} style={{ width: '100%' }} value={c.prompt} onChange={e => patch({ commands: draft.commands.map((x, j) => (j === i ? { ...x, prompt: e.target.value } : x)) })} /></Field>
+      </div>)}
+      <Btn size="sm" icon="plus" onClick={() => patch({ commands: [...draft.commands, { name: 'new', description: '', prompt: '$ARGUMENTS' }] })}>{tr('Add a command')}</Btn>
     </section>
 
     <div className="row" style={{ gap: 8, justifyContent: 'flex-end', position: 'sticky', bottom: 0, padding: '12px 0', background: 'var(--st-surface)' }}>

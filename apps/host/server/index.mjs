@@ -88,6 +88,9 @@ import { validateChatImages } from './chat-images.mjs';
 import { createTimeSkip, measureFolder, timeskipRevisionMessage, imageTypeOf } from './timeskip.mjs';
 import { createProfileStore, profileSampling, PROFILE_IDS } from './profiles.mjs';
 import { createPinnedModel, pinConfig } from './pinned-model.mjs';
+import { createRpStore } from './rp/store.mjs';
+import { createRpRoutes } from './rp/routes.mjs';
+import { createMemoryStore, memoryPrompt } from './memory.mjs';
 import { TOOL_GROUPS } from './agent/tools-catalog.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -134,6 +137,12 @@ const PIN = pinConfig();
 const pinned = createPinnedModel({ config: PIN, modelProviders, log: line => console.log(line) });
 pinned.onChange(state => hub.send('pinned', state));
 if (PIN) void pinned.ensure().catch(e => console.error('pinned model:', e.message));
+/** The roleplay library and its prompt (rp/): characters, personas, lorebooks, the RP settings, generation. */
+const rpStore = createRpStore({ dataDir: store.DATA_DIR });
+/** Memory across chats (memory.mjs): in the prompt of a profile with memory on; the agent saves to it with its memory tools. */
+const memoryStore = createMemoryStore({ dataDir: store.DATA_DIR });
+const profileMemory = profile => (profile?.memory?.read || profile?.memory?.write ? memoryPrompt(profile.memory.read ? memoryStore.list() : [], !!profile.memory.write && profile.agent) : null);
+const rpRoutes = createRpRoutes({ rp: rpStore, modelProviders, pinned: PIN ? pinned : null, profileStore, profileSampling, log: line => console.log(line) });
 const imageModels = createImageModels({ dataDir: store.DATA_DIR, modelsDir: () => store.MODELS_DIR, real: models.REAL, changed: value => hub.send('image-models', value) });
 /* The installed app ships Strata Control (python + strata_control) next to the host; a source checkout has none and keeps its older paths. */
 const CONTROL = findControl();
@@ -182,7 +191,7 @@ const native=createNativeControl({control,ready:bundledEngine,appUpdater,hardwar
    pinned component (STRATA_HARNESS_DIR), not part of this host, so its absence is a visible capability
    state and the chat falls back to the direct path with a notice, never silently to another model. */
 // What the person chose in Settings -> Tools (tool groups, web search service and key, the browser, their own tools).
-const llmProxy = createLlmProxy({ targetOf: key => agent.llmTarget(key), samplingNow: () => samplingFromExpert(store.get().expert), profileOf: id => (PROFILE_IDS.includes(id) ? profileStore.get(id) : null) });
+const llmProxy = createLlmProxy({ targetOf: key => agent.llmTarget(key), samplingNow: () => samplingFromExpert(store.get().expert), profileOf: id => (PROFILE_IDS.includes(id) ? profileStore.get(id) : null), memoryOf: profileMemory });
 const agentTools = createAgentTools({ read: () => store.get().agentTools, write: value => store.update({ agentTools: value }), dataDir: store.DATA_DIR, browser: () => ({ ...findBrowser(), cli: findPlaywrightMcp(agent.harnessDir()) }) });
 agentTools.ensureFile();
 const visionProbe = createVisionProbe();
@@ -208,6 +217,7 @@ async function pictureRefusal(connection, model) {
 }
 const agent = createAgentBridge({
   profilePolicyFile: profileStore.policyFile,
+  memoryFile: memoryStore.file,
   bindProfile: (harnessSessionId, profileId) => profileStore.bindSession(harnessSessionId, profileId),
   tools: () => agentTools.profileView(),
   skillsDir: () => AGENT_SKILLS,
@@ -606,7 +616,8 @@ async function runRemoteTurn({ selection, message, history, images = [], thinkin
     // The profile's prompt replaces the app's short one, or follows it; its sampling, output cap and thinking budget go into the request.
     const ownPrompt = profile?.systemPrompt?.trim() ?? '';
     const basePrompt = 'You are Strata, a helpful assistant. Answer clearly. Do not claim to have read files or performed actions unless their results are included in the conversation.';
-    const systemPrompt = [profile && ownPrompt && profile.promptPlacement === 'replace' ? ownPrompt : basePrompt, profile?.promptPlacement === 'add' ? ownPrompt : '', skillInstructions(appliedSkills)].filter(Boolean).join('\n\n');
+    const memoryText = profile?.memory?.read ? memoryPrompt(memoryStore.list(), false) : '';
+    const systemPrompt = [profile && ownPrompt && profile.promptPlacement === 'replace' ? ownPrompt : basePrompt, profile?.promptPlacement === 'add' ? ownPrompt : '', memoryText, skillInstructions(appliedSkills)].filter(Boolean).join('\n\n');
     // Only the profile's own budget: an API model never took the composer's (the server's answer room still keeps room for the answer).
     const budget = profile?.thinkingBudget > 0 ? profile.thinkingBudget : 0;
     const extra = { ...(profile ? profileSampling(profile) : {}), ...(profile?.maxTokens ? { max_tokens: profile.maxTokens } : {}), ...(budget ? { reasoning_budget_tokens: budget } : {}) };
@@ -1019,6 +1030,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 async function api(req, res, path, method, url) {
+  if (path.startsWith('/api/rp/') && await rpRoutes(req, res, path, method, url)) return undefined;
   if(path==='/api/fonts'&&method==='GET')return json(res,200,await systemFonts());
   // --- chats: one file each in the data folder -----------------------------
   // Not held back by a model folder move: saving a chat has nothing to do with the models. A page must name itself (x-strata-client), which
@@ -1971,6 +1983,13 @@ async function api(req, res, path, method, url) {
   const profileRoute = /^\/api\/profiles\/(chat|code|rp)(\/reset)?$/.exec(path);
   if (profileRoute && method === 'PUT' && !profileRoute[2]) { try { return json(res, 200, { profile: profileStore.save(profileRoute[1], await readBody(req)) }); } catch (e) { return error(res, 400, e.message); } }
   if (profileRoute && method === 'POST' && profileRoute[2]) return json(res, 200, { profile: profileStore.reset(profileRoute[1]) });
+  // Memory (Settings -> Memory): the list, add, edit, delete, clear.
+  if (path === '/api/memory' && method === 'GET') return json(res, 200, { items: memoryStore.list() });
+  if (path === '/api/memory' && method === 'POST') { try { return json(res, 200, memoryStore.add((await readBody(req)).text, 'you')); } catch (e) { return error(res, 400, e.message); } }
+  if (path === '/api/memory' && method === 'DELETE') { memoryStore.clear(); return json(res, 200, { items: [] }); }
+  const memoryRoute = /^\/api\/memory\/([\w-]{1,40})$/.exec(path);
+  if (memoryRoute && method === 'PUT') { try { memoryStore.update(memoryRoute[1], (await readBody(req)).text); return json(res, 200, { items: memoryStore.list() }); } catch (e) { return error(res, 400, e.message); } }
+  if (memoryRoute && method === 'DELETE') { memoryStore.remove(memoryRoute[1]); return json(res, 200, { items: memoryStore.list() }); }
   if (path === '/api/pinned' && method === 'GET') return json(res, 200, pinned.state());
   if (path === '/api/pinned/start' && method === 'POST') { try { await pinned.ensure(); return json(res, 200, pinned.state()); } catch (e) { return error(res, 503, e.message); } }
   // The assistant's model requests, with the person's Response settings added (llm-shape.mjs). This computer only.

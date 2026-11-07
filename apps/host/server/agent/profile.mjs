@@ -63,6 +63,7 @@ export const MODELS_PLUGIN = fileURLToPath(new URL('./plugins/strata-models.mjs'
 export const SEARCH_PLUGIN = fileURLToPath(new URL('./plugins/strata-search.mjs', import.meta.url));
 /** The app's own tool server for the tools a person writes (instructions, commands). */
 export const CUSTOM_TOOLS_SCRIPT = fileURLToPath(new URL('./custom-tools-mcp.mjs', import.meta.url));
+export const MEMORY_SCRIPT = fileURLToPath(new URL('./memory-mcp.mjs', import.meta.url));
 
 /** The search service as the person knows it, for the question that comes before the first web search in a chat. */
 const SEARCH_NAMES = Object.freeze({ builtin: 'DuckDuckGo, or Bing when DuckDuckGo is busy', exa: 'Exa', perplexity: 'Perplexity', deepseek: 'DeepSeek' });
@@ -194,7 +195,7 @@ export function outputBudget(context, maxOutput = null) {
 /** What a local model, or an OpenAI-style server on this network, takes for the thinking level (see the comment where a local route is built). */
 const THINKING_COMPAT = { supportsStore: false, thinkingFormat: 'chat-template', chatTemplateKwargs: { enable_thinking: { $var: 'thinking.enabled' }, reasoning_effort: { $var: 'thinking.effort', omitWhenOff: true } } };
 
-export function buildProfile({ local = [], connections = [], gate = true, tools = NO_TOOLS_SETTINGS, skillsDir = null, proxyBase = null, searchMock = null, defaultLocalId = null, policyFile = null }) {
+export function buildProfile({ local = [], connections = [], gate = true, tools = NO_TOOLS_SETTINGS, skillsDir = null, proxyBase = null, searchMock = null, defaultLocalId = null, policyFile = null, memoryFile = null }) {
   const providers = {};
   const env = {};
   const routes = [];
@@ -306,7 +307,9 @@ export function buildProfile({ local = [], connections = [], gate = true, tools 
   // The browser: Playwright's tool server on the person's own Chrome or Edge, in a separate empty profile (what the Harness's own browser provider does). Every action asks in Manual.
   const browserRows = tools.browserEnabled && tools.browserPath && tools.browserCli
     ? [{ id: 'mcp-browser', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'browser', transport: 'stdio', command: process.execPath, args: [tools.browserCli, '--browser', 'chromium', '--isolated', ...(process.env.STRATA_BROWSER_HEADLESS === '1' ? ['--headless'] : []), '--executable-path', tools.browserPath] } }] : [];
-  const ownRows = [...own('instructions', tools.hasInstructionTools), ...own('commands', tools.hasCommandTools), ...browserRows];
+  // Memory across chats (../memory.mjs): remember / recall / forget; which profiles may use them is the profile's memory switch.
+  const memoryRows = memoryFile ? [{ id: 'mcp-strata-memory', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'memory', transport: 'stdio', command: process.execPath, args: [MEMORY_SCRIPT, memoryFile] } }] : [];
+  const ownRows = [...own('instructions', tools.hasInstructionTools), ...own('commands', tools.hasCommandTools), ...browserRows, ...memoryRows];
   // Web search: DuckDuckGo with no key unless the person chose a keyed service AND saved its key (then that one; never a half-set-up one).
   const searchOn = !tools.off.has('search');
   const keyed = ['exa', 'perplexity', 'deepseek'].includes(tools.search.provider) && tools.search.key ? tools.search.provider : null;

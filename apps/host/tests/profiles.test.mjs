@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyProfileToAgentBody, createProfileStore, filterSkillCatalog, normalizeProfile, policyReader, skillAllowed, toolAllowed } from '../server/profiles.mjs';
+import { DEFAULT_PROFILES, applyProfileToAgentBody, createProfileStore, filterSkillCatalog, normalizeProfile, policyReader, skillAllowed, toolAllowed } from '../server/profiles.mjs';
 
 const code = normalizeProfile('code', {
   skills: { all: false, allow: ['docx', 'pdf', 'xlsx'] }, tools: { groups: { search: false }, connected: false },
-  sampling: { temperature: 0.7, top_k: 20 }, systemPrompt: 'CODE RULES', promptPlacement: 'add',
+  sampling: { temperature: 0.7, top_k: 20 }, systemPrompt: 'CODE RULES', promptPlacement: 'add', agents: [],
 });
 
 test('a profile allows its tool groups, refuses the others, and keeps the Harness internals', () => {
@@ -62,5 +62,5 @@ test('the store saves profiles and tells the gate which session is in which prof
   assert.equal(read('other'), null);
   assert.equal(createProfileStore({ dataDir: dir }).get('code').systemPrompt, 'X', 'a restart reads the saved profiles');
   writeFileSync(join(dir, 'profiles.json'), '{broken');
-  assert.equal(createProfileStore({ dataDir: dir }).get('code').systemPrompt, '', 'a damaged file falls back to the defaults');
+  assert.equal(createProfileStore({ dataDir: dir }).get('code').systemPrompt, DEFAULT_PROFILES.code.systemPrompt, 'a damaged file falls back to the defaults');
 });

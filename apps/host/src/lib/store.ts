@@ -40,6 +40,7 @@ import { setTranslationLanguage, tr, validLanguage, type Language } from './i18n
  */
 import { useSyncExternalStore } from 'react';
 import { api, ApiError, onEvent, streamPost, type StreamEvent } from './client';
+import type { RpLibrary } from './types';
 import type {
   Workspace,
   ChatMessage,
@@ -112,7 +113,7 @@ export interface AppState {
   shareTelemetry: boolean;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
-  settingsSection: 'Appearance' | 'Models' | 'Profiles' | 'Tools' | 'Storage' | 'Engine' | 'About';
+  settingsSection: 'Appearance' | 'Models' | 'Profiles' | 'Roleplay' | 'Memory' | 'Tools' | 'Storage' | 'Engine' | 'About';
   hardware: Hardware | null;
   library: ModelLibrary | null;
   imageModels: ImageModelLibrary | null;
@@ -123,6 +124,8 @@ export interface AppState {
   pinned: PinnedModelState | null;
   /** The chat profiles and the tool groups their settings switch (server/profiles.mjs). */
   profiles: ProfilesState | null;
+  /** The roleplay library (server/rp/): characters, personas, lorebooks and the roleplay settings. */
+  rpLibrary: RpLibrary | null;
   engine: EngineConfig | null;
   serving: ServingState | null;
   monitor: MonitorState | null;
@@ -331,6 +334,7 @@ let state: AppState = {
   remoteModel: null,
   pinned: null,
   profiles: null,
+  rpLibrary: null,
   engine: null,
   serving: null,
   monitor: null,
@@ -958,6 +962,7 @@ export async function bootstrap() {
       providers: soft<ModelProviders>('/api/model-providers'),
       pinned: soft<PinnedModelState>('/api/pinned'),
       profiles: soft<ProfilesState>('/api/profiles'),
+      rpLibrary: soft<RpLibrary>('/api/rp/library'),
       imageModels: soft<ImageModelLibrary>('/api/image-models'),
       runtime: soft<RuntimeModels>('/api/runtime'),
     };
@@ -985,6 +990,7 @@ export async function bootstrap() {
     void late.providers.then(providers => { if (providers) applyProviders(providers); });
     void late.pinned.then(pinned => { if (pinned) applyPinned(pinned); });
     void late.profiles.then(profiles => { if (profiles) set({ profiles }); });
+    void late.rpLibrary.then(rpLibrary => { if (rpLibrary) set({ rpLibrary }); });
     void late.imageModels.then(imageModels => { if (imageModels) set({ imageModels }); });
     void late.runtime.then(runtime => { if (runtime) set({ runtime }); });
     if (!shellAnnounced) { shellAnnounced = true; void announcePortNotice(); rememberShellLanguage(state.language); }
@@ -1741,6 +1747,7 @@ export function stopStreaming() {
 export async function retryLast(messageId?: string) {
   const source = state.sessions.find(s => s.id === state.activeSession);
   if (!source || state.streaming) return;
+  if (source.rp && rpHooks) return rpHooks.retry(source.id, messageId);
   const end = messageId ? source.messages.findIndex(m => m.id === messageId) : source.messages.length - 1;
   const user = source.messages.slice(0, end + 1).reverse().find(m => m.role === 'user');
   if (!user) return;
@@ -1850,6 +1857,7 @@ export function branchFrom(messageId: string): string | null {
 export async function continueLast() {
   const sessionId = state.activeSession;
   if (!sessionId || state.streaming) return;
+  if (state.sessions.find(s => s.id === sessionId)?.rp && rpHooks) return rpHooks.continue(sessionId);
   const session = state.sessions.find((s) => s.id === sessionId);
   const last = session?.messages[session.messages.length - 1];
   if (!last || last.role !== 'assistant' || !last.content.trim()) return;
@@ -1986,6 +1994,18 @@ export async function startPlanGoal(planId: string) { await sendMessage('', { pl
 export async function sendMessage(text: string, options: { fromLoop?: boolean; goalAction?: 'resume'; planId?: string; shown?: string; title?: string; markdown?: boolean; reattach?: string; requestId?: string } = {}) {
   // `reattach`: a turn the host is still running for this chat (or finished while the page was away) is taken over again after a reload, not started.
   const reattach = options.reattach;
+  // A roleplay chat is sent by rp.ts (its own prompt and reply handling), never by the agent.
+  if (!reattach && rpHooks && state.sessions.find(s => s.id === state.activeSession)?.rp) { if (!state.streaming) await rpHooks.send(text); return; }
+  // The profile's own slash commands (Settings -> Profiles -> Commands): "/name text" goes out as the command's prompt; the chat shows what was typed.
+  if (!reattach && !options.shown) {
+    const m = /^\/([a-z0-9][a-z0-9-]*)(?:\s+([\s\S]*))?$/.exec(text.trim());
+    const own = m ? state.profiles?.profiles[profileOf(state.sessions.find(s => s.id === state.activeSession))]?.commands.find(c => c.name === m[1]) : undefined;
+    if (m && own) {
+      const args = (m[2] ?? '').trim();
+      const prompt = own.prompt.includes('$ARGUMENTS') ? own.prompt.replace(/\$ARGUMENTS/g, args).trim() : [own.prompt.trim(), args].filter(Boolean).join('\n\n');
+      return sendMessage(prompt, { ...options, shown: text.trim() });
+    }
+  }
   if (state.streaming && !reattach) {
     // Typed while the assistant works: behind a running goal it waits in the queue; otherwise there is nothing to do but wait.
     const waiting = state.activeSession, line = text.trim();
@@ -2292,6 +2312,18 @@ export async function sendMessage(text: string, options: { fromLoop?: boolean; g
     if (next !== undefined) { if (!releasedMessages.get(sessionId)?.length) releasedMessages.delete(sessionId); setTimeout(() => void sendMessage(next), 0); }
   }
 }
+
+/** Roleplay chats (rp.ts registers these, so the store does not import it). */
+let rpHooks: { send: (text: string) => Promise<void>; retry: (sessionId: string, messageId?: string) => Promise<void>; continue: (sessionId: string) => Promise<void> } | null = null;
+export function registerRpHooks(hooks: NonNullable<typeof rpHooks>) { rpHooks = hooks; }
+/** For rp.ts only: the store's own chat primitives. */
+export const storeInternals = {
+  patchSession: (id: string, fn: (s: Session) => Session) => patchSession(id, fn),
+  markTurn: (id: string, turn: { abort: AbortController; agent: boolean } | null) => markTurn(id, turn),
+  uid: (prefix?: string) => uid(prefix),
+  setState: (patch: Partial<AppState>) => set(patch),
+  get liveTurns() { return liveTurns; },
+};
 
 /** Messages the host handed back when a goal ended with some still waiting; sent one after another. */
 const releasedMessages = new Map<string, string[]>();

@@ -42,10 +42,12 @@ import { composeQuoted, parseQuoted, type Quote } from '../lib/quotes';
 /** Chat — talk to the one loaded model. */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Markdown } from '../components/Markdown';
+import { RpBar, RpEmpty, RpMessage } from '../components/RpChat';
+import '../lib/rp';
 import { Btn, Icon, IconBtn, ErrorNotice, type IconName } from '../components/ui';
 import { composerCap, scrollBehavior } from '../lib/responsive';
 import { relTime, cx, duration, tokens, tps } from '../lib/format';
-import { addQuote, clearQuotes, removeQuote, createSubagentExample, parkMessage, takeParked, pushToast, setPreviewTabClosed, branchFrom, continueLast, markRead, retryLast, selectSession, rewindTo, sendMessage, stopStreaming, useStore, } from '../lib/store';
+import { profileOf, addQuote, clearQuotes, removeQuote, createSubagentExample, parkMessage, takeParked, pushToast, setPreviewTabClosed, branchFrom, continueLast, markRead, retryLast, selectSession, rewindTo, sendMessage, stopStreaming, useStore, } from '../lib/store';
 import { CopyBtn, CopyMenuItem, MenuCloseContext } from '../components/CopyBtn';
 import { KEYS_UP, PILL_DISTANCE, distanceFromBottom, followAfterScroll, wheelLeavesBottom } from '../lib/follow-scroll';
 import { getSlashCommands } from '../lib/commands';
@@ -111,6 +113,12 @@ export function ChatScreen() {
             selectSession(session.id);
     }, [draftKey]);
     const updateDraft = (value: string) => { setDraft(value); sessionStorage.setItem(draftKey, value); };
+    // Roleplay's Impersonate writes the person's next message into the box (rp.ts).
+    useEffect(() => {
+        const onCompose = (e: Event) => { const d = (e as CustomEvent<{ sessionId: string; text: string }>).detail; if (d && d.sessionId === session?.id) { setDraft(d.text); sessionStorage.setItem(draftKey, d.text); } };
+        window.addEventListener('strata:compose', onCompose);
+        return () => window.removeEventListener('strata:compose', onCompose);
+    }, [draftKey, session?.id]);
     const splitRef = useRef<HTMLDivElement>(null);
     const [splitWidth, setSplitWidth] = useState(0);
     const [previewFraction, setPreviewFraction] = useState(() => {
@@ -526,7 +534,8 @@ export function ChatScreen() {
         }}>
 
             <div className="chat__inner">
-              {tr(session.messages.length === 0 ? (session.statsAvailable === false ? <p className="small muted">{tr("Editing from an earlier message. Update the prompt below.")}</p> :
+              {session.rp ? <RpBar session={session}/> : null}
+              {session.rp ? session.messages.map((m, i) => <RpMessage key={m.id} m={m} session={session} isLast={i === session.messages.length - 1}/>) : session.profile === 'rp' && session.messages.length === 0 ? <RpEmpty/> : tr(session.messages.length === 0 ? (session.statsAvailable === false ? <p className="small muted">{tr("Editing from an earlier message. Update the prompt below.")}</p> :
             <UsageDashboard loaded={!!loaded}/>) : (session.messages.map((m, i) => (<Message key={m.id} message={m} isLast={i === session.messages.length - 1} onEditPrompt={messageHandlers.onEditPrompt} onPreview={messageHandlers.onPreview} onClosePreview={messageHandlers.onClosePreview} onOpenTimeSkip={messageHandlers.onOpenTimeSkip} timeSkipDone={!!allTimeSkipRuns.find(r => r.id === m.timeSkipId)?.completedAt} timeSkipReal={!!allTimeSkipRuns.find(r => r.id === m.timeSkipId)?.job} timeSkipRun={allTimeSkipRuns.find(r => r.id === m.timeSkipId)} onOpenLink={messageHandlers.onOpenLink}/>))))}
               <QueuedMessages chatId={session.id}/>
             </div>
@@ -549,9 +558,17 @@ interface SlashCommand {
     icon: IconName;
     run: () => void;
 }
-function useSlashCommands(clear: () => void, setDraft: (value: string) => void): SlashCommand[] {
+function useSlashCommands(clear: () => void, setDraft: (value: string) => void, session?: Session | null): SlashCommand[] {
     const demo = useStore(s => s.library?.mode === 'simulated');
+    const own = useStore(s => s.profiles?.profiles[profileOf(session)]?.commands) ?? NO_COMMANDS;
+    if (session?.rp) return [
+        { id: 'rp-continue', label: '/continue', hint: 'Continue the last reply', icon: 'refresh', run: () => setDraft('/continue') },
+        { id: 'rp-impersonate', label: '/impersonate', hint: 'The model writes your next message into the box', icon: 'pencil', run: () => setDraft('/impersonate') },
+        { id: 'rp-swipe', label: '/swipe', hint: 'Write another version of the last reply', icon: 'refresh', run: () => setDraft('/swipe') },
+        { id: 'rp-talk', label: '/talk', hint: 'Make a character speak: /talk name', icon: 'chat', run: () => setDraft('/talk ') },
+    ];
     return [
+        ...own.map(c => ({ id: `own-${c.name}`, label: `/${c.name}`, hint: c.description || c.prompt.slice(0, 80), icon: 'bolt' as const, run: () => setDraft(`/${c.name} `) })),
         { id: 'time-skip', label: '/time-skip', hint: 'Try a change on a copy, check it, and keep it only if it is better', icon: 'branch', run: () => setDraft('/time-skip ') },
         { id: 'goal', label: '/goal', hint: 'Set a goal and let the assistant keep working until it is done', icon: 'bolt', run: () => setDraft('/goal ') },
         { id: 'plan', label: '/plan', hint: 'Have the assistant write a plan first; nothing runs until you approve it', icon: 'check', run: () => setDraft('/plan ') },
@@ -586,6 +603,7 @@ function SlashMenu({ query, commands, cursor, onPick, onHover, }: {
     </div>);
 }
 const NO_PARKED: string[] = [];
+const NO_COMMANDS: { name: string; description: string; prompt: string }[] = [];
 /** Whether the reader has words selected inside the transcript: a view that moves under the pointer loses the selection (#3818). */
 function readerHasSelection(scroller: HTMLElement): boolean {
     const sel = window.getSelection();
@@ -612,7 +630,7 @@ function Composer({ draft, setDraft, loaded, streaming, onSubmit, onKey, session
     const canChat = loaded || native?.instances.some(i => i.status === 'ready');
     const whileBusy = useStore(s => s.whileBusy), parkedList = useStore(s => (session ? s.parked[session.id] : undefined)) ?? NO_PARKED;
     const quoteList = useStore(s => (session ? s.quotes[session.id] : undefined)) ?? NO_QUOTES;
-    const commands = useSlashCommands(clearDraft, setDraft);
+    const commands = useSlashCommands(clearDraft, setDraft, session);
     const [cursor, setCursor] = useState(0);
     const [fileError, setFileError] = useState('');
     const [slashOpen, setSlashOpen] = useState(false);
@@ -642,7 +660,7 @@ function Composer({ draft, setDraft, loaded, streaming, onSubmit, onKey, session
         <div className="composer__inner">
           <ApprovalDock sessionId={session?.id}/>
           {tr(fileError ? <ErrorNotice message={fileError} action={tr("Dismiss")} onRetry={() => setFileError('')}/> : null)}
-          <FolderChip chatId={session?.id} disabled={streaming}/>
+          {session?.preferences?.agent === false ? null : <FolderChip chatId={session?.id} disabled={streaming}/>}
           <GoalBar chatId={session?.id}/>
           {tr(quoteList.length ? <div className="quotes">{tr(quoteList.map(q => <div className="quote" key={q.id}><button type="button" className="quote__body" title={tr("Go to the quoted message")} onClick={() => document.querySelector(`[data-message-id="${CSS.escape(q.messageId)}"]`)?.scrollIntoView({ block: 'center', behavior: scrollBehavior() })}><span className="xs muted">{tr(q.role === 'user' ? "Quoting you" : "Quoting the assistant")}</span><span className="quote__text">{q.text}</span></button><IconBtn name="x" size={14} title={tr("Remove this quote")} onClick={() => removeQuote(session!.id, q.id)}/></div>))}</div> : null)}
           {tr(parkedList.length ? <div className="parked" role="status">{tr(parkedList.map((text, i) => <div className="parked__item" key={`${i}-${text}`}><span className="xs muted">{tr("Waiting to send")}</span><span className="parked__text" title={text}>{text}</span><IconBtn name="x" size={14} title={tr("Take back")} onClick={() => { const back = takeParked(session!.id, i); if (back !== undefined && !draft.trim()) setDraft(back); }}/></div>))}</div> : null)}

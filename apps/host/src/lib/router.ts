@@ -10,6 +10,7 @@ export const ROUTES = [
   'monitor',
   'tasks',
   'skills',
+  'characters',
   'settings',
 ] as const;
 

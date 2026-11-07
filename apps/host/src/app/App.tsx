@@ -1,3 +1,4 @@
+import { CharactersScreen } from '../screens/Characters';
 import { tr } from '../lib/i18n';
 /** App shell: routes, setup takeover, palette, toasts. */
 import { useNative } from '../lib/native';
@@ -172,6 +173,8 @@ function RouteView({ route }: {
             return <TasksScreen />;
         case 'skills':
             return <SkillsScreen />;
+        case 'characters':
+            return <CharactersScreen />;
         default:
             return <ChatScreen />;
     }

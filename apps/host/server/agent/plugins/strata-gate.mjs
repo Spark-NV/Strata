@@ -36,6 +36,8 @@ const LOOK_ONLY_SERVER = 'mcp__strata-instructions__';
 const COMMANDS_SERVER = 'mcp__strata-commands__';
 /** The browser tool server's name in the agent (Settings -> Tools). Looking at the page does not ask; acting on it does. */
 const BROWSER_SERVER = 'mcp__browser__';
+/** The memory tools (../memory-mcp.mjs) change only the person's memory list, which they see and edit in Settings: never a question. */
+const MEMORY_SERVER = 'mcp__memory__';
 const BROWSER_LOOKING = new Set(['browser_snapshot', 'browser_take_screenshot', 'browser_console_messages', 'browser_network_requests', 'browser_wait_for']);
 
 /** Tools that cannot change anything on this computer. Everything else asks. */
@@ -344,7 +346,7 @@ export function manualDecision(exec, options = {}) {
   if (tool === 'write') return { kind: 'ask', reason: `Create or replace the file ${clip(args.file_path ?? args.path, 200)}` };
   if (tool === 'edit') return { kind: 'ask', reason: `Change the file ${clip(args.file_path ?? args.path, 200)}` };
   if (tool === 'job_kill') return { kind: 'ask', reason: 'Stop a background task' };
-  if (tool.startsWith(LOOK_ONLY_SERVER)) return null;
+  if (tool.startsWith(LOOK_ONLY_SERVER) || tool.startsWith(MEMORY_SERVER)) return null;
   if (tool.startsWith(BROWSER_SERVER)) return browserDecision(tool.slice(BROWSER_SERVER.length), args);
   if (tool.startsWith(COMMANDS_SERVER)) return { kind: 'ask', reason: `Run your tool “${tool.slice(COMMANDS_SERVER.length).replace(/_/g, ' ')}”${args.input ? ` with: ${clip(args.input, 120)}` : ''}` };
   if (tool.startsWith('mcp__')) return { kind: 'ask', reason: `Use the connected tool ${tool.split('__').slice(1).join(' / ')}` };
@@ -370,7 +372,7 @@ function browserDecision(name, args) {
  */
 export function planDecision(exec) {
   const tool = String(exec.name ?? '');
-  if (!tool.startsWith('mcp__') || tool.startsWith(LOOK_ONLY_SERVER)) return null;
+  if (!tool.startsWith('mcp__') || tool.startsWith(LOOK_ONLY_SERVER) || tool.startsWith(MEMORY_SERVER)) return null;
   return { kind: 'deny', reason: 'Plan mode only looks and changes nothing, so it cannot use this tool. Switch to Manual or Bypass to use it.' };
 }
 
@@ -449,7 +451,7 @@ export function apply(ctx, config = {}) {
     if (!gate) return next();
     if (gate.web) {
       // The person's switch, or a yes already given in this chat: no question.
-      if (web.skipAsk === true || webAllowed.has(chatOf(agent.session))) return next();
+      if (web.skipAsk === true || profile?.webWithoutAsking === true || webAllowed.has(chatOf(agent.session))) return next();
       // A helper's own approval policy is `never`; it must be `ask` for the question to reach the person.
       if (agent.session.header?.origin === 'subagent' && ctx.approval.overrideOf(agent.session) !== 'ask') {
         agent.session.append('approval/policy', { policy: 'ask' });
