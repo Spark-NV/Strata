@@ -146,3 +146,21 @@ test('the RP message box format: spoken, action, thought and narration in and ou
   const r = buildRpPrompt({ settings, characters: [mira], speakerId: mira.id, persona: null, books: [], history: [{ role: 'user', content: 'hi' }], authorsNote: null, contextMax: 32768 });
   assert.ok(r.messages[0].content.includes('((double parentheses)) is a private thought'));
 });
+
+test('recent projects: newest first, instruction files found, AGENTS.md created from the template', async () => {
+  const { createProjects } = await import('../server/projects.mjs');
+  const { writeFileSync, readFileSync, mkdirSync } = await import('node:fs');
+  const base = mkdtempSync(join(tmpdir(), 'strata-proj-'));
+  const a = join(base, 'a'), b = join(base, 'b');
+  mkdirSync(a); mkdirSync(b); writeFileSync(join(b, 'CLAUDE.md'), 'x');
+  const p = createProjects({ file: join(base, 'recent.json'), seed: [a] });
+  p.touch(b);
+  assert.deepEqual(p.list().map(x => x.name), ['b', 'a']);
+  assert.deepEqual(p.list()[0].instructions, ['CLAUDE.md']);
+  assert.throws(() => p.touch('/etc'), /system folder/);
+  const r = await p.openAgentsFile(a, { editor: 'true' });
+  assert.equal(r.created, true);
+  assert.ok(readFileSync(join(a, 'AGENTS.md'), 'utf8').startsWith('# a'));
+  p.remove(a);
+  assert.deepEqual(createProjects({ file: join(base, 'recent.json') }).list().map(x => x.name), ['b']);
+});

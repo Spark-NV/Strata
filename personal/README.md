@@ -162,3 +162,15 @@ branch, Continue, Impersonate (writes your next message into the box), Next spea
 in groups, the author's note, the chat's lorebooks, and the prompt inspector (search icon). Commands:
 `/continue /impersonate /swipe /talk name`. Not done: SillyTavern's sticky and cooldown timers (kept on
 import and export but not applied), and the extensions (image generation, TTS, vector storage).
+
+### Code projects
+
+A new Code chat's start screen has a Recent projects tab (`apps/host/server/projects.mjs`, list in
+`~/.strata/data/recent-projects.json`): every folder a chat was pointed at, newest first, with its git
+branch and which agent instruction files it has. Clicking one makes it the chat's folder. Per project:
+Edit / New AGENTS.md opens it in Kate (`STRATA_EDITOR` overrides; a missing file is created from a
+short template with the sections a good one has), and Write / Improve with the assistant sends this
+chat a prepared message: read the project, ask at most 6 questions about what the code cannot tell
+(as answer cards), write a short AGENTS.md, and add one-line CLAUDE.md / QWEN.md / GEMINI.md pointers
+for the tools you say you use. The agent harness loads AGENTS.md into every Code chat in that folder.
+

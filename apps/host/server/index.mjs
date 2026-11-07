@@ -91,6 +91,7 @@ import { createPinnedModel, pinConfig } from './pinned-model.mjs';
 import { createRpStore } from './rp/store.mjs';
 import { createRpRoutes } from './rp/routes.mjs';
 import { createMemoryStore, memoryPrompt } from './memory.mjs';
+import { createProjects } from './projects.mjs';
 import { TOOL_GROUPS } from './agent/tools-catalog.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -539,6 +540,8 @@ const nativeDrops = createNativeDrops();
 const uploads = createUploads({ dir: join(store.DATA_DIR, 'uploads'), folderOf: chatId => chatRoot(chatId), attachments: chatAttachments });
 try { uploads.sweep(); } catch { /* best effort */ }
 const chatFolders = createChatFolders({ file: join(store.DATA_DIR, 'chat-folders.json') });
+/** Recent projects (projects.mjs): the folders Code chats worked in, shown on a new Code chat's start screen. */
+const projects = createProjects({ file: join(store.DATA_DIR, 'recent-projects.json'), seed: chatFolders.paths() });
 /** Where a chat's files are: its chosen folder, else the folder its agent worked in, else the default workspace (chat-files.mjs). One source for every file route. */
 const chatRoot = chatId => chatRootOf({ chosen: chatFolders.get(chatId), used: agent.workingFolder?.(chatId), fallback: workspaces[0]?.path ?? WORKSPACE });
 
@@ -1831,8 +1834,13 @@ async function api(req, res, path, method, url) {
     if (!id) return error(res, 400, 'sessionId is required');
     if (agent.isRunning(id)) return error(res, 409, 'This chat is still working. Stop it or wait for it to finish, then choose the folder.');
     if (body.path === null || body.path === '') { chatFolders.clear(id); return json(res, 200, { folder: null }); }
-    try { return json(res, 200, { folder: chatFolders.set(id, body.path) }); } catch (e) { return error(res, 400, e.message); }
+    try { const folder = chatFolders.set(id, body.path); try { projects.touch(folder.path); } catch { /* the list is a convenience */ } return json(res, 200, { folder }); } catch (e) { return error(res, 400, e.message); }
   }
+  // Recent projects (projects.mjs): the list, adding and removing one, and its AGENTS.md in the person's editor.
+  if (path === '/api/projects' && method === 'GET') return json(res, 200, { projects: projects.list() });
+  if (path === '/api/projects' && method === 'POST') { try { projects.add((await readBody(req)).path); return json(res, 200, { projects: projects.list() }); } catch (e) { return error(res, 400, e.message); } }
+  if (path === '/api/projects' && method === 'DELETE') { projects.remove(url.searchParams.get('path') ?? ''); return json(res, 200, { projects: projects.list() }); }
+  if (path === '/api/projects/agents-file' && method === 'POST') { try { return json(res, 200, await projects.openAgentsFile((await readBody(req)).path)); } catch (e) { return error(res, 400, e.message); } }
   if (path === '/api/files/open' && method === 'POST') {
     const body = await readBody(req);
     try { return json(res, 200, openFile(chatRoot(String(body.sessionId ?? '')), body.path, String(body.how ?? 'app'))); }

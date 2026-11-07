@@ -7684,3 +7684,14 @@ html[data-motion='reduced'] .native-progress__bar[data-indeterminate] > i { anim
 .rp-speech .rp-action, .rp-speech .rp-thought, .rp-action .rp-speech, .rp-thought .rp-speech { font-style: normal; }
 .rp-action .rp-thought, .rp-thought .rp-action { font-style: italic; }
 .rp-speech em { font-style: italic; }
+/* Recent projects on a new Code chat's start screen (RecentProjects.tsx). */
+.projects { display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.projects__row { display: flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: var(--st-r-md); padding: 2px 4px; }
+.projects__row:hover { background: var(--st-surface-2); }
+.projects__row[data-current] { border-color: var(--st-accent); background: var(--st-accent-tint); }
+.projects__row[data-missing] { opacity: .55; }
+.projects__main { flex: 1; min-width: 0; display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; padding: 6px 4px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.projects__main:disabled { cursor: default; }
+.projects__name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projects__meta { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-home:has(.projects) .usage-card { width: min(720px, 100%); max-width: 720px; }

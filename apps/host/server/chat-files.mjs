@@ -54,6 +54,8 @@ export function createChatFolders({ file }) {
       return { path: target, name: basename(target) || target, exists: true };
     },
     clear(chatId) { delete table[chatId]; save(); },
+    /** Every folder some chat works in (seeds the recent projects). */
+    paths() { return [...new Set(Object.values(table).filter(p => typeof p === 'string'))]; },
   };
 }
 

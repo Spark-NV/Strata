@@ -2,21 +2,27 @@ import {localeTag} from '../lib/i18n';
 import { tr } from '../lib/i18n';
 import { useMemo, useState } from 'react';
 import { Btn, Icon } from './ui';
+import { RecentProjects } from './RecentProjects';
+import type { Session } from '../lib/types';
 import { Brand } from './Brand';
 import { useNative } from '../lib/native';
 import { go, useStore } from '../lib/store';
 import { tokens } from '../lib/format';
 import { calendarDays, usageDashboard, type UsagePeriod } from '../lib/usage-dashboard';
 const colors = ['#4d82d8', '#6998e6', '#8aaeea', '#a6c1ee', '#c4d7f4', '#dce7f8'];
-export function UsageDashboard({ loaded }: {
+export function UsageDashboard({ loaded, session }: {
     loaded: boolean;
+    /** A Code chat also gets its recent projects, as the first tab. */
+    session?: Session | null;
 }) {
     const native = useNative(), remoteModel = useStore(s => s.remoteModel);
     // With a pinned model there is nothing to choose: the app starts it itself.
     const pinnedOn = useStore(s => s.pinned?.enabled === true);
     const canChat = loaded || !!remoteModel || !!native?.instances.some(i => i.id === native.defaultId && i.status === 'ready');
     const sessions = useStore(s => s.sessions), library = useStore(s => s.library);
-    const [tab, setTab] = useState<'overview' | 'models'>('overview'), [period, setPeriod] = useState<UsagePeriod>('all'), [expanded, setExpanded] = useState(false);
+    const code = session?.profile === 'code';
+    const tabs = (code ? ['projects', 'overview', 'models'] : ['overview', 'models']) as ('projects' | 'overview' | 'models')[];
+    const [tab, setTab] = useState<'projects' | 'overview' | 'models'>(code ? 'projects' : 'overview'), [period, setPeriod] = useState<UsagePeriod>('all'), [expanded, setExpanded] = useState(false);
     const now = new Date();
     const usage = useMemo(() => usageDashboard(sessions, period), [sessions, period]);
     const label = (id: string | null) => library?.variants.find(v => v.id === id)?.family ?? id ?? '—';
@@ -55,16 +61,16 @@ export function UsageDashboard({ loaded }: {
     return <section className="usage-home" aria-label={tr("Usage dashboard")}>
     <h2>{tr("What do we start with?")}</h2>
     <div className="usage-card">
-      <div className="usage-card__toolbar"><div role="tablist" aria-label={tr("Usage view")}>{tr((['overview', 'models'] as const).map(v => <button key={v} role="tab" id={`usage-tab-${v}`} aria-controls="usage-content" aria-selected={tab === v} tabIndex={tab === v ? 0 : -1} onKeyDown={e => {
+      <div className="usage-card__toolbar"><div role="tablist" aria-label={tr("Usage view")}>{tr(tabs.map(v => <button key={v} role="tab" id={`usage-tab-${v}`} aria-controls="usage-content" aria-selected={tab === v} tabIndex={tab === v ? 0 : -1} onKeyDown={e => {
                 if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
                     e.preventDefault();
-                    const next = e.key === 'Home' ? 'overview' : e.key === 'End' ? 'models' : tab === 'overview' ? 'models' : 'overview';
+                    const at = tabs.indexOf(tab), next = e.key === 'Home' ? tabs[0] : e.key === 'End' ? tabs[tabs.length - 1] : tabs[(at + (e.key === 'ArrowLeft' ? tabs.length - 1 : 1)) % tabs.length];
                     setTab(next);
                     document.getElementById(`usage-tab-${next}`)?.focus();
                 }
-            }} onClick={() => setTab(v)}>{tr(v === 'overview' ? 'Overview' : 'Models')}</button>))}</div><div role="group" aria-label={tr("Usage period")}>{tr((['all', '30d', '7d'] as const).map(v => <button key={v} aria-pressed={period === v} onClick={() => setPeriod(v)}>{tr(v === 'all' ? 'All' : v)}</button>))}</div></div>
+            }} onClick={() => setTab(v)}>{tr(v === 'projects' ? 'Recent projects' : v === 'overview' ? 'Overview' : 'Models')}</button>))}</div>{tab === 'projects' ? null : <div role="group" aria-label={tr("Usage period")}>{tr((['all', '30d', '7d'] as const).map(v => <button key={v} aria-pressed={period === v} onClick={() => setPeriod(v)}>{tr(v === 'all' ? 'All' : v)}</button>))}</div>}</div>
       <div id="usage-content" role="tabpanel" aria-labelledby={`usage-tab-${tab}`}>
-        {tr(tab === 'overview' ? <><dl className="usage-stats">{tr([{ label: 'Sessions', value: usage.sessions.toLocaleString(localeTag()) }, { label: 'Messages', value: usage.messages.toLocaleString(localeTag()) }, { label: 'Total tokens', value: tokens(usage.total) }, { label: 'Active days', value: usage.activeDays.toLocaleString(localeTag()) }, { label: 'Peak hour', value: peak }, { label: 'Favorite model', value: label(usage.favorite) }].map(stat => <div key={stat.label}><dt>{tr(stat.label)}</dt><dd title={tr(stat.value)}>{tr(stat.value)}</dd></div>))}</dl>
+        {tab === 'projects' && session ? <RecentProjects session={session}/> : tr(tab === 'overview' ? <><dl className="usage-stats">{tr([{ label: 'Sessions', value: usage.sessions.toLocaleString(localeTag()) }, { label: 'Messages', value: usage.messages.toLocaleString(localeTag()) }, { label: 'Total tokens', value: tokens(usage.total) }, { label: 'Active days', value: usage.activeDays.toLocaleString(localeTag()) }, { label: 'Peak hour', value: peak }, { label: 'Favorite model', value: label(usage.favorite) }].map(stat => <div key={stat.label}><dt>{tr(stat.label)}</dt><dd title={tr(stat.value)}>{tr(stat.value)}</dd></div>))}</dl>
           <div className="usage-heatmap" style={{ gridTemplateColumns: `repeat(${heatDays.length / 7},minmax(0,1fr))` }} role="img" aria-label={tr("Daily message activity. {0} active days in this period.", [usage.activeDays])}>{tr(heatDays.map((date, i) => { const n = usage.days.get(date)?.messages ?? 0; return <span key={date || `pad-${i}`} aria-hidden="true" data-level={!n ? 0 : Math.min(4, Math.ceil(n / maxMessages * 4))} data-empty={!date || undefined} title={tr(date ? date < chartDays[0] && period !== 'all' ? `${dateLabel(date)}: outside selected period` : `${dateLabel(date)}: ${n} messages` : undefined)}/>; }))}</div>
           <div className="usage-heatmap__legend"><span>{tr(dateLabel(heatDays[0]))} – {tr(dateLabel(chartDays.at(-1)!))}</span><span>{tr("Less ")}<i data-level="0"/><i data-level="1"/><i data-level="2"/><i data-level="3"/><i data-level="4"/>{tr(" More")}</span></div>
         </> : <>

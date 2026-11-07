@@ -238,5 +238,18 @@
   "rp237": "What you do",
   "rp238": "What you think; others cannot hear it",
   "rp239": "Plain narration, no style",
-  "rp240": "Write what you say, do or think. Pick a style, or select text and pick one."
+  "rp240": "Write what you say, do or think. Pick a style, or select text and pick one.",
+  "rp241": "added",
+  "rp242": "today",
+  "rp243": "{0} days ago",
+  "rp244": "Write an AGENTS.md for this project.",
+  "rp245": "Created {0}",
+  "rp246": "Opened {0}",
+  "rp247": "No editor could be started. Open the file yourself.",
+  "rp248": "No projects yet. Pick a folder: it is listed here from then on.",
+  "rp249": "no agent instructions",
+  "rp250": "folder not found",
+  "rp251": "The assistant reads the project, asks you what it cannot find out, and writes AGENTS.md",
+  "rp252": "Remove from the list",
+  "rp253": "Open another folder…"
 }
