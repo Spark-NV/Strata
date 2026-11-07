@@ -104,7 +104,7 @@ test('the library store keeps one file per item and the settings', () => {
   assert.equal(rp.characters.image(c.id).type, 'image/png');
   rp.saveSettings({ ...rp.settings(), userName: 'Sam', promptOrder: [{ id: 'chatHistory', enabled: true }, { id: 'main', enabled: true }] });
   assert.equal(rp.settings().userName, 'Sam');
-  assert.equal(rp.settings().promptOrder.length, 11, 'missing pieces come back');
+  assert.equal(rp.settings().promptOrder.length, 12, 'missing pieces come back');
   rp.characters.remove(c.id);
   assert.equal(rp.characters.get(c.id), null);
 });
@@ -131,4 +131,18 @@ test('a helper started as @name gets that agent\'s instructions and only its too
   assert.ok(main.messages[0].content.endsWith('MEMORY'));
   assert.equal(normalizeProfile('code', { systemPrompt: '' }).systemPrompt.startsWith('Work like'), true, 'an old empty prompt takes the new default');
   assert.equal(normalizeProfile('code', { systemPrompt: '', rev: 2 }).systemPrompt, '', 'an empty prompt saved on purpose stays empty');
+});
+
+test('the RP message box format: spoken, action, thought and narration in and out, and the model is told about it', async () => {
+  const { build } = await import('esbuild');
+  const out = await build({ entryPoints: ['src/lib/rp-format.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
+  const { parseRp, serializeRp } = await import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString('base64')}`);
+  const markup = '"Yes you can do it!" *reaches out to high five you* ((he will miss)) then waits.';
+  const segs = parseRp(markup);
+  assert.deepEqual(segs.map(s => s.kind), ['speech', 'plain', 'action', 'plain', 'thought', 'plain']);
+  assert.equal(serializeRp(segs), markup);
+  assert.deepEqual(parseRp('**bold** and *act*').map(s => s.kind), ['plain', 'action']);
+  assert.equal(serializeRp([{ kind: 'action', text: 'one\ntwo' }]), '*one*\n*two*');
+  const r = buildRpPrompt({ settings, characters: [mira], speakerId: mira.id, persona: null, books: [], history: [{ role: 'user', content: 'hi' }], authorsNote: null, contextMax: 32768 });
+  assert.ok(r.messages[0].content.includes('((double parentheses)) is a private thought'));
 });

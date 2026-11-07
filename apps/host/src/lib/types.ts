@@ -526,7 +526,7 @@ export interface RpPersona { id: string; name: string; description: string; avat
 export interface RpCustomPrompt { id: string; name: string; role: RpRole; content: string; enabled: boolean; depth: number | null }
 export interface RpReplacement { id: string; name: string; find: string; replace: string; flags: string; on: 'output' | 'input' | 'both'; enabled: boolean }
 export interface RpSettings {
-  userName: string; mainPrompt: string; auxiliaryPrompt: string; postHistoryPrompt: string; preferCharPrompt: boolean; preferCharInstructions: boolean;
+  userName: string; mainPrompt: string; formatPrompt: string; auxiliaryPrompt: string; postHistoryPrompt: string; preferCharPrompt: boolean; preferCharInstructions: boolean;
   impersonationPrompt: string; continuePrompt: string; groupNudgePrompt: string; newChatPrompt: string; newGroupChatPrompt: string; newExampleChatPrompt: string;
   examplesBehavior: 'gradual' | 'always' | 'disabled'; namesBehavior: 'groups' | 'always' | 'never'; squashSystem: boolean;
   promptOrder: { id: string; enabled: boolean }[]; customPrompts: RpCustomPrompt[];

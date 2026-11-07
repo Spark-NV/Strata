@@ -151,6 +151,12 @@ positions), the author's note, character's note and persona at their depths, nam
 stop strings at the person's (and other members') names, and the newest messages that fit the window.
 Example dialogues give way first. Sampling, thinking and the output cap come from the RP profile.
 
+The RP message box has Spoken, Action, Thought and Narration buttons (Alt+S, Alt+A, Alt+T, Alt+N): pick
+one and type, or select text and press one. The box and the chat show only the style (speech in an
+accent colour, actions in grey italics, thoughts in violet italics with a dotted underline); what is
+sent is "speech", *action*, ((thought)), and the Text format piece of the prompt (Settings -> Roleplay)
+tells the model to read and write it that way. Editing a message uses the same box.
+
 In a chat: swipes (‹ n/m ›, past the last version writes a new one), edit, delete, hide from the model,
 branch, Continue, Impersonate (writes your next message into the box), Next speaker and click-a-member
 in groups, the author's note, the chat's lorebooks, and the prompt inspector (search icon). Commands:

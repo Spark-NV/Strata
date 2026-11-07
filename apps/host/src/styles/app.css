@@ -7664,3 +7664,23 @@ html[data-motion='reduced'] .native-progress__bar[data-indeterminate] > i { anim
 /* Long text (prompts, descriptions, lore) gets the whole row under its label in the fork's editors. */
 .settings-body .field:has(.field__control--wide textarea), .rp-editor .field:has(.field__control--wide), .rp-entry .field:has(.field__control--wide), .dialog-body .field:has(.field__control--wide textarea) { flex-direction: column; align-items: stretch; gap: 10px; }
 .settings-body .field:has(.field__control--wide textarea) .field__control--wide, .rp-editor .field__control--wide, .rp-entry .field__control--wide, .dialog-body .field:has(.field__control--wide textarea) .field__control--wide { width: 100%; justify-content: stretch; }
+/* Roleplay text: spoken words, actions and thoughts, markers hidden (lib/rp-format.ts). */
+:root { --rp-speech: #b45309; --rp-action: var(--st-ink-soft); --rp-thought: #7c3aed; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --rp-speech: #fbbf72; --rp-thought: #c4b5fd; } }
+:root[data-theme="dark"] { --rp-speech: #fbbf72; --rp-thought: #c4b5fd; }
+.rp-speech { color: var(--rp-speech); font-weight: 500; }
+.rp-action { color: var(--rp-action); font-style: italic; }
+.rp-thought { color: var(--rp-thought); font-style: italic; text-decoration: underline dotted; text-underline-offset: 3px; }
+.rp-text p { margin: 0 0 .7em; white-space: pre-wrap; line-height: 1.6; }
+.rp-text p:last-child { margin-bottom: 0; }
+.rp-editor-box { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.rp-format { display: flex; flex-wrap: wrap; gap: 4px; }
+.rp-format__btn { border: 1px solid var(--st-line); background: var(--st-surface-2); border-radius: var(--st-r-pill); padding: 2px 10px; font: inherit; font-size: var(--st-fs-sm); cursor: pointer; color: var(--st-ink); }
+.rp-format__btn[aria-pressed="true"] { border-color: var(--st-accent); box-shadow: 0 0 0 2px var(--st-accent-tint); }
+.rp-input { min-height: 44px; max-height: 40vh; overflow-y: auto; padding: 8px 4px; outline: none; white-space: pre-wrap; word-break: break-word; line-height: 1.55; font-size: var(--st-fs-md); }
+.rp-input:empty::before { content: attr(data-placeholder); color: var(--st-ink-muted); pointer-events: none; }
+.rp-edit .rp-input { border: 1px solid var(--st-line); border-radius: var(--st-r-md); padding: 8px 10px; background: var(--st-surface); }
+.rp-action, .rp-thought { font-weight: 400; }
+.rp-speech .rp-action, .rp-speech .rp-thought, .rp-action .rp-speech, .rp-thought .rp-speech { font-style: normal; }
+.rp-action .rp-thought, .rp-thought .rp-action { font-style: italic; }
+.rp-speech em { font-style: italic; }

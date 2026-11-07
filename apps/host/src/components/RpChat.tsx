@@ -8,7 +8,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { branchFrom, useStore } from '../lib/store';
 import { avatarUrl, rpDeleteMessage, rpDeleteSwipe, rpEditMessage, rpGenerate, rpPreview, rpSwipe, rpToggleHidden, setRpChat, useRpLibrary } from '../lib/rp';
 import type { ChatMessage, RpAuthorsNote, RpCharacter, Session } from '../lib/types';
-import { Markdown } from './Markdown';
+import { RpEditor, RpText } from './RpEditor';
 import { ReasoningBlock } from './ReasoningBlock';
 import { CopyBtn } from './CopyBtn';
 import { FloatingMenu } from './FloatingMenu';
@@ -64,12 +64,11 @@ function RpMessageView({ m, session, isLast }: { m: ChatMessage; session: Sessio
       </div>
       {m.reasoning ? <ReasoningBlock message={m} /> : null}
       {editing ? <div className="rp-edit">
-        <textarea className="st-input" value={text} rows={Math.min(24, Math.max(3, text.split('\n').length + 1))} onChange={e => setText(e.target.value)} autoFocus
-          onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save(); if (e.key === 'Escape') setEditing(false); }} />
+        <div onKeyDown={e => { if (e.key === 'Escape') setEditing(false); }}><RpEditor value={text} onChange={setText} onSubmit={save} autoFocus label="Edit message" /></div>
         <div className="row" style={{ gap: 8 }}><Btn variant="primary" size="sm" onClick={save}>{tr('Save')}</Btn><Btn size="sm" onClick={() => setEditing(false)}>{tr('Cancel')}</Btn></div>
       </div> : <div className="rp-msg__text">
         {m.error ? <ErrorNotice message={m.error} /> : null}
-        {m.content ? <Markdown text={m.content} /> : m.streaming ? <span className="typing" aria-label={tr('Generating')}><i /><i /><i /></span> : null}
+        {m.content ? <RpText text={m.content} /> : m.streaming ? <span className="typing" aria-label={tr('Generating')}><i /><i /><i /></span> : null}
         {m.streaming && m.content ? <span className="caret" aria-hidden="true" /> : null}
       </div>}
       {!user && (swipes > 1 || canNew) && !editing ? <div className="rp-swipes">
@@ -100,7 +99,7 @@ function AuthorsNoteDialog({ session, onClose }: { session: Session; onClose: ()
 }
 
 type Preview = Awaited<ReturnType<typeof rpPreview>>;
-const PIECE_LABELS: Record<string, string> = { main: 'Main prompt', worldInfoBefore: 'World Info (before)', personaDescription: 'Persona', charDescription: 'Description', charPersonality: 'Personality', scenario: 'Scenario', auxiliary: 'Auxiliary', worldInfoAfter: 'World Info (after)', dialogueExamples: 'Examples', chatHistory: 'Chat', postHistory: 'Post-history' };
+const PIECE_LABELS: Record<string, string> = { main: 'Main prompt', formatting: 'Text format', worldInfoBefore: 'World Info (before)', personaDescription: 'Persona', charDescription: 'Description', charPersonality: 'Personality', scenario: 'Scenario', auxiliary: 'Auxiliary', worldInfoAfter: 'World Info (after)', dialogueExamples: 'Examples', chatHistory: 'Chat', postHistory: 'Post-history' };
 const pieceLabel = (p = '') => p.split(' + ').map(x => PIECE_LABELS[x] ?? x).join(' + ');
 function InspectorDialog({ session, onClose }: { session: Session; onClose: () => void }) {
   const [data, setData] = useState<Preview | null>(null), [err, setErr] = useState('');

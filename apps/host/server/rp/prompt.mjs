@@ -290,6 +290,7 @@ export function buildRpPrompt({ settings, characters, speakerId, persona, books,
 
   const piece = {
     main: mainText,
+    formatting: sub(s.formatPrompt),
     worldInfoBefore: join(wi.before.map(t => sub(t))),
     personaDescription: persona && persona.position === 'prompt' && persona.description.trim() ? sub(persona.description) : '',
     charDescription: cards.length > 1 ? cards.map(c => (c.description.trim() ? `${c.name}: ${describe(c)}` : '')).filter(Boolean).join('\n\n') : describe(speaker),

@@ -22,7 +22,7 @@ const pick = (v, choices, d) => (choices.includes(v) ? v : d);
 
 /** The built-in pieces of a roleplay prompt, in SillyTavern's order. `chatHistory` is where the conversation goes. */
 export const PROMPT_PIECES = Object.freeze([
-  ['main', 'Main prompt'], ['worldInfoBefore', 'World Info (before)'], ['personaDescription', 'Persona'],
+  ['main', 'Main prompt'], ['formatting', 'Text format'], ['worldInfoBefore', 'World Info (before)'], ['personaDescription', 'Persona'],
   ['charDescription', 'Character description'], ['charPersonality', 'Character personality'], ['scenario', 'Scenario'],
   ['auxiliary', 'Auxiliary prompt'], ['worldInfoAfter', 'World Info (after)'], ['dialogueExamples', 'Example dialogues'],
   ['chatHistory', 'Chat history'], ['postHistory', 'Post-history instructions'],
@@ -37,6 +37,8 @@ export const DEFAULT_RP_SETTINGS = Object.freeze({
     + "- Show, don't tell: concrete sensory detail, body language, and dialogue in {{char}}'s own voice.\n"
     + "- Move the scene forward with initiative; let other characters and the world react.\n"
     + "- Vary sentence structure and wording; do not repeat phrases, openings or descriptions from earlier replies.",
+  // How the chat marks speech, actions and thoughts (the RP message box writes it this way, and the page draws it without the markers).
+  formatPrompt: 'How text is marked in this chat: words in "double quotes" are spoken aloud; text in *asterisks* is an action or description; text in ((double parentheses)) is a private thought that no one else can hear; unmarked text is narration. {{user}}\'s messages use this, so treat {{user}}\'s ((thoughts)) as unknown to {{char}} unless {{char}} could plausibly guess them. Write your replies the same way: {{char}}\'s speech in "quotes", actions in *asterisks*, {{char}}\'s inner thoughts in ((double parentheses)).',
   auxiliaryPrompt: '',
   postHistoryPrompt: '',
   preferCharPrompt: true,
@@ -88,7 +90,7 @@ export function normalizeRpSettings(raw = {}) {
   const wi = s.worldInfo ?? {}, an = s.authorsNote ?? {}, g = s.group ?? {};
   return {
     userName: str(s.userName, 100).trim() || d.userName,
-    mainPrompt: text('mainPrompt'), auxiliaryPrompt: text('auxiliaryPrompt'), postHistoryPrompt: text('postHistoryPrompt'),
+    mainPrompt: text('mainPrompt'), formatPrompt: text('formatPrompt'), auxiliaryPrompt: text('auxiliaryPrompt'), postHistoryPrompt: text('postHistoryPrompt'),
     preferCharPrompt: bool(s.preferCharPrompt, d.preferCharPrompt), preferCharInstructions: bool(s.preferCharInstructions, d.preferCharInstructions),
     impersonationPrompt: text('impersonationPrompt'), continuePrompt: text('continuePrompt'), groupNudgePrompt: text('groupNudgePrompt'),
     newChatPrompt: text('newChatPrompt'), newGroupChatPrompt: text('newGroupChatPrompt'), newExampleChatPrompt: text('newExampleChatPrompt'),

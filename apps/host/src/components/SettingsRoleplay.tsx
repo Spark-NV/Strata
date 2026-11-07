@@ -11,7 +11,7 @@ import type { RpCustomPrompt, RpReplacement, RpSettings } from '../lib/types';
 import { Btn, ErrorNotice, Field, IconBtn, Select } from './ui';
 
 const PIECES: Record<string, string> = {
-  main: 'Main prompt', worldInfoBefore: 'World Info (before)', personaDescription: 'Persona', charDescription: 'Character description',
+  main: 'Main prompt', formatting: 'Text format', worldInfoBefore: 'World Info (before)', personaDescription: 'Persona', charDescription: 'Character description',
   charPersonality: 'Character personality', scenario: 'Scenario', auxiliary: 'Auxiliary prompt', worldInfoAfter: 'World Info (after)',
   dialogueExamples: 'Example dialogues', chatHistory: 'Chat history', postHistory: 'Post-history instructions',
 };
@@ -58,6 +58,7 @@ export function SettingsRoleplay() {
       <div className="st-card st-card--flush">
         <Field label={tr('Your name')} hint={tr('{{user}} when no persona is picked.')}><input className="st-input" style={{ width: 200 }} value={draft.userName} onChange={e => patch({ userName: e.target.value })} /></Field>
         <Prompt label="Main prompt" hint="The first instruction: who the model plays and how to write. {{char}}, {{user}} and the other macros work." rows={9} value={draft.mainPrompt} onChange={v => patch({ mainPrompt: v })} />
+        <Prompt label="Text format" hint="Tells the model how speech, actions and thoughts are marked. The message box writes your text this way and the chat shows it without the markers." rows={4} value={draft.formatPrompt} onChange={v => patch({ formatPrompt: v })} />
         <Prompt label="Auxiliary prompt" hint="A second instruction block (SillyTavern’s NSFW / auxiliary prompt). Empty: not sent." value={draft.auxiliaryPrompt} onChange={v => patch({ auxiliaryPrompt: v })} />
         <Prompt label="Post-history instructions" hint="Sent after the chat, last, where it weighs the most (SillyTavern’s jailbreak). Empty: not sent." value={draft.postHistoryPrompt} onChange={v => patch({ postHistoryPrompt: v })} />
         <Field label={tr('Prefer the character’s prompts')} hint={tr('A card’s own main prompt and post-history instructions replace these ({{original}} puts these back in).')}>
