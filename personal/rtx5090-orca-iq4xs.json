@@ -29,6 +29,7 @@
   "log": "/home/spark/Apps/Strata/strata-orca-iq4_xs-fork.log",
   "fit_max_tokens": true,
   "short_answer_room": true,
+  "reasoning_budget_tokens": 32768,
   "reasoning_loop_recovery": "wrap",
   "expert_profile_save": "/home/spark/Apps/Strata/data/expert-profile-iq4_xs-learned.bin",
   "expert_profile_save_every": 5,

@@ -82,3 +82,13 @@ of the GGUF's IQ4_XS copy: perplexity 4.100 -> 4.053 on the quality set, speed
 unchanged, 1212 MiB of host RAM instead of 322 MiB (results README). The file is
 Qwen's BF16 table with the abliteration's refusal direction removed
 (`tools/embd_bf16_ablit.py`); remove the `--embd-gguf` entry from `args` to go back.
+
+Reasoning effort defaults to `xhigh` (the model's own default): line 17 of
+`/home/spark/Apps/MODELS/qwen38-fixed-chat-template.jinja` sets
+`_default_reasoning_effort`; the `medium` original is kept beside it as
+`qwen38-fixed-chat-template.medium-default.jinja.bak`. A request can still ask
+for `reasoning_effort` low or medium. The server's answer room (on by default)
+closes the thinking early enough to leave a quarter of a request's `max_tokens`
+for the answer, and `"reasoning_budget_tokens": 32768` caps the thinking of a
+request that sets no limit. Checked 2026-11-06: a 1,200-token cap thought 688
+tokens and answered in full.
