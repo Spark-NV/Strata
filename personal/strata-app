@@ -6,4 +6,11 @@ export STRATA_HARNESS_DIR=/home/spark/Applications/strata-runtime/squashfs-root/
 export STRATA_PIN_BASE_URL=http://127.0.0.1:8082/v1
 export STRATA_PIN_SERVICE=qwen-orca-iq4xs.service
 export STRATA_PIN_NAME="Qwen3.8 Flash Next Uncensored"
+# The image model of Image chats (apps/host/server/image-model.mjs): stable-diffusion.cpp's sd-server (built by
+# tools/image/install.py into engine-image/) with Qwen-Image-2.1. Loading it stops the pinned model first.
+export STRATA_IMAGE_SERVER=/home/spark/Apps/Strata/engine-image/sd-server
+export STRATA_IMAGE_DIFFUSION=/home/spark/Apps/MODELS/qwen-image-2.1-F16-model.gguf
+export STRATA_IMAGE_LLM=/home/spark/Apps/MODELS/Qwen-Image-2.1-encoder-Q8_0.gguf
+export STRATA_IMAGE_VAE=/home/spark/Apps/MODELS/qwen_image_2.1_vae_bf16.safetensors
+export STRATA_IMAGE_NAME="Qwen-Image-2.1"
 exec /home/spark/Applications/strata-runtime/squashfs-root/AppRun "$@"

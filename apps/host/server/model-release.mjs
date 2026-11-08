@@ -67,7 +67,8 @@ const KEEP_MS = 8 * DAY;
 
 /**
  * When the model came up and when it stopped, and why, kept in a small file so the Monitor can show how long it ran and how long it was
- * stopped while idle or for games. Events: { at, up: true } or { at, up: false, reason: 'idle' | 'game' | 'other', detail }. 'other' is a
+ * stopped while idle, for games or for the image model. Events: { at, up: true } or { at, up: false, reason: 'idle' | 'game' | 'image' |
+ * 'other', detail }. 'other' is a
  * stop the app did not make (systemctl, the Terminal, a crash) or one it did not see (the app was closed). Older than 8 days is dropped,
  * except the last event before that, which says what the state was then.
  */
@@ -86,7 +87,9 @@ export function createActivityLog({ file = null, now = Date.now } = {}) {
   };
   function add(event) {
     const last = events.at(-1);
-    if (last && last.up === event.up) return;
+    // A repeated state is no event; a stop whose reason changes is (stopped for images, then the image model unloaded for a game),
+    // except to 'other', which only says the model is not answering.
+    if (last && last.up === event.up && (event.up || last.reason === event.reason || event.reason === 'other')) return;
     events.push(event);
     const cutoff = now() - KEEP_MS;
     const firstKept = events.findIndex(e => e.at >= cutoff);
@@ -95,7 +98,7 @@ export function createActivityLog({ file = null, now = Date.now } = {}) {
   }
   /** How long it ran and how long it was stopped (by reason) in [from, to], in ms. Time before the first event is not counted. */
   function totals(from, to = now()) {
-    const out = { running: 0, idle: 0, game: 0, other: 0 };
+    const out = { running: 0, idle: 0, game: 0, image: 0, other: 0 };
     events.forEach((e, i) => {
       const start = Math.max(e.at, from), end = Math.min(events[i + 1]?.at ?? to, to);
       if (end <= start) return;
@@ -142,7 +145,7 @@ export function createModelReleaser({ pinned, idleMs, gameRelease, games, metric
         missed = phase === 'ready' ? missed + 1 : MISSES_DOWN;
         if (missed >= MISSES_DOWN) {
           known = new Set(current.keys());
-          if (up || !activity.current() || activity.current().up) activity.down('other');
+          if (!activity.current() || activity.current().up) activity.down('other');
           up = false; busy = false;
         }
         return null;

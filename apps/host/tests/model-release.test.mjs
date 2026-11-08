@@ -213,7 +213,7 @@ test('the activity log: time running and stopped by reason, kept in a file acros
     log.up(); log.up(); t += H;                      // a repeated state is one event
     log.down('game', 'Elden Ring'); t += 3 * H;
     log.down('other');                               // already stopped: not a new event
-    assert.deepEqual(log.totals(1_000 * D), { running: 3 * H, idle: H, game: 3 * H, other: 0 });
+    assert.deepEqual(log.totals(1_000 * D), { running: 3 * H, idle: H, game: 3 * H, image: 0, other: 0 });
     assert.deepEqual(log.current(), { up: false, since: 1_000 * D + 4 * H, reason: 'game', detail: 'Elden Ring' });
     const again = createActivityLog({ file, now: () => t });
     assert.deepEqual(again.totals(1_000 * D), log.totals(1_000 * D), 'read back from the file');

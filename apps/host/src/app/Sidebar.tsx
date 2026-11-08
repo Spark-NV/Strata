@@ -19,13 +19,15 @@ import { bindingFor, bindingKeys, useBindings } from '../lib/shortcut-bindings';
 import { Btn, Dialog, Icon, IconBtn, type IconName } from '../components/ui';
 import { Brand } from '../components/Brand';
 import { deleteSession, go, isUnread, liveChatIds, newSession, profileOf, renameSession, selectSession, setNavOpen, togglePin, toggleRail, setTheme, useStore } from '../lib/store';
-import type { ChatProfileId } from '../lib/types';
+import type { SessionProfileId } from '../lib/types';
+import { imageModelLine } from '../components/ImageChat';
 /** The chat profiles, in the order the sidebar shows them. */
-const PROFILE_GROUPS: { id: ChatProfileId; label: string; icon: IconName }[] = [
+const PROFILE_GROUPS: { id: SessionProfileId; label: string; icon: IconName }[] = [
     { id: 'chat', label: 'Chat', icon: 'chat' },
     { id: 'code', label: 'Code', icon: 'folder' },
     { id: 'vibe', label: 'Vibe', icon: 'bolt' },
     { id: 'rp', label: 'RP', icon: 'skills' },
+    { id: 'image', label: 'Image', icon: 'image' },
 ];
 export function Sidebar({ containerRef }: {
     containerRef: RefObject<HTMLElement | null>;
@@ -67,15 +69,18 @@ export function Sidebar({ containerRef }: {
     const menuTrigger = useRef<HTMLElement | null>(null);
     const current = library?.variants.find(v => v.id === library.loaded);
     const native = useNative(), nativeCurrent = native?.instances.find(i => i.id === native.defaultId);
-    const modelName = (pinned?.enabled ? pinned.name : null) ?? nativeCurrent?.label ?? (current?.local ? current.name : current?.family) ?? tr('No model loaded');
+    // While the image model has the GPU (Image chats, image-model.mjs) the chip is about it.
+    const imageModel = useStore(s => s.imageModel);
+    const imageActive = !!imageModel?.enabled && ['freeing', 'loading', 'ready', 'stopping'].includes(imageModel.phase);
+    const modelName = (imageActive ? imageModel!.name : null) ?? (pinned?.enabled ? pinned.name : null) ?? nativeCurrent?.label ?? (current?.local ? current.name : current?.family) ?? tr('No model loaded');
     // The version from the catalog and the card it runs on ("Q2_0 · GPU 2"), not the file id.
     const nativeSize = nativeCurrent ? native?.catalog?.families.flatMap(f => f.sizes).find(s => s.id === nativeCurrent.model) : undefined;
     const nativeSecond = nativeCurrent ? [nativeSize?.model ?? nativeCurrent.model.toUpperCase(), nativeCurrent.gpus.length ? nativeCurrent.gpus.map(g => `GPU ${g + 1}`).join(' + ') : ''].filter(Boolean).join(' · ') : null;
     // The pinned model's own state (pinned-model.mjs); released = stopped for a game or after idle time (model-release.mjs).
-    const pinnedLine = !pinned?.enabled ? null : pinned.phase === 'ready' ? tr('Running · {0}K context', [Math.round((pinned.context ?? 0) / 1000)]) : pinned.phase === 'error' ? (pinned.error ?? tr('Not running')) : pinned.phase === 'released' ? (pinned.released?.reason === 'game' ? tr('Stopped for a game · starts when you write') : tr('Stopped while idle · starts when you write')) : pinned.phase === 'stopping' ? tr('Stopping…') : pinned.phase === 'checking' ? tr('Checking…') : tr('Starting…');
-    const modelQuant = pinnedLine ?? nativeSecond ?? current?.quant ?? tr('View model versions');
+    const pinnedLine = !pinned?.enabled ? null : pinned.phase === 'ready' ? tr('Running · {0}K context', [Math.round((pinned.context ?? 0) / 1000)]) : pinned.phase === 'error' ? (pinned.error ?? tr('Not running')) : pinned.phase === 'released' ? (pinned.released?.reason === 'game' ? tr('Stopped for a game · starts when you write') : pinned.released?.reason === 'image' ? tr('Stopped for images · starts when you write') : tr('Stopped while idle · starts when you write')) : pinned.phase === 'stopping' ? tr('Stopping…') : pinned.phase === 'checking' ? tr('Checking…') : tr('Starting…');
+    const modelQuant = (imageActive ? imageModelLine(imageModel) : null) ?? pinnedLine ?? nativeSecond ?? current?.quant ?? tr('View model versions');
     const phase = nativeCurrent ? (nativeCurrent.status === 'ready' ? nativeCurrent.phase : nativeCurrent.status) : monitor?.phase ?? 'idle';
-    const status = pinned?.enabled ? (pinned.phase === 'ready' ? 'Ready' : pinned.phase === 'error' ? 'Error' : pinned.phase === 'released' ? 'Stopped' : pinned.phase === 'stopping' ? 'Stopping' : 'Loading') : phase === 'unavailable' ? 'Status unavailable' : phase === 'error' ? 'Error' : phase === 'loading' ? 'Loading' : !current && !nativeCurrent ? 'No model loaded' : phase === 'reading' ? 'Reading prompt' : phase === 'thinking' ? 'Thinking' : phase === 'generating' ? 'Generating' : 'Ready';
+    const status = imageActive ? (imageModel!.phase === 'ready' ? (imageModel!.job ? 'Generating' : 'Ready') : imageModel!.phase === 'stopping' ? 'Stopping' : 'Loading') : pinned?.enabled ? (pinned.phase === 'ready' ? 'Ready' : pinned.phase === 'error' ? 'Error' : pinned.phase === 'released' ? 'Stopped' : pinned.phase === 'stopping' ? 'Stopping' : 'Loading') : phase === 'unavailable' ? 'Status unavailable' : phase === 'error' ? 'Error' : phase === 'loading' ? 'Loading' : !current && !nativeCurrent ? 'No model loaded' : phase === 'reading' ? 'Reading prompt' : phase === 'thinking' ? 'Thinking' : phase === 'generating' ? 'Generating' : 'Ready';
     // The model is busy with a chat that is not the one in front of the person: the chip says which one (a title, or how many).
     const awayChats = [...working].filter(id => !(location.route === 'chat' && id === activeSession));
     const awayTitle = awayChats.length === 1 ? sessions.find(s => s.id === awayChats[0]) : undefined;
@@ -101,9 +106,9 @@ export function Sidebar({ containerRef }: {
           {PROFILE_GROUPS.map(g => {
                 // One group per chat profile (Chat, Code, RP): its own new-chat button and its own chats (server/profiles.mjs).
                 const expanded = folders[g.id] !== false || !!q;
-                const rows = matching.filter(s => profileOf(s) === g.id);
+                const rows = matching.filter(s => (s.profile === 'image' ? 'image' : profileOf(s)) === g.id);
                 const shown = q ? rows : rows.slice(0, 20);
-                const name = profiles?.profiles[g.id]?.name ?? g.label;
+                const name = (g.id === 'image' ? null : profiles?.profiles[g.id]?.name) ?? g.label;
                 return <div className="ws__group" key={g.id}>
               <div className="ws__row"><button className="ws__name" aria-expanded={expanded} onClick={() => setFolders(f => ({ ...f, [g.id]: !expanded }))}><Icon name="chevron" size={14} className={cx('ws__chev', expanded && 'is-open')}/><Icon name={g.icon} size={17}/><span>{name}</span></button><button type="button" className="st-btn st-btn--icon ws__new" aria-label={tr("New {0} chat", [name])} title={tr("New {0} chat", [name])} onClick={() => { setNavOpen(false); if (g.id === 'rp') { go('characters'); return; } const s = newSession(g.id); go('chat', s.id); }}><Icon name="new-chat" size={18}/></button></div>
               {tr(expanded ? <div className="navsessions">

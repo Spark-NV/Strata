@@ -144,12 +144,43 @@ The watch runs only while the app runs.
 The Monitor's **Model time** card (`apps/host/src/components/ModelTime.tsx`, `GET /api/pinned/activity`) shows:
 
 - whether the model is running and for how long, how long it has been idle, and a bar toward the 30 minute stop;
-- while it is stopped, for how long and why: idle, a game (named), or outside the app;
-- today's and the last 7 days' time running, stopped while idle, stopped for games, and stopped for other reasons.
+- while it is stopped, for how long and why: idle, a game (named), images, or outside the app;
+- today's and the last 7 days' time running, stopped while idle, for games, for images, and for other reasons.
 
 The log is `~/.strata/data/model-activity.json` and keeps 8 days. Time is only recorded while the app runs:
 a stop the app did not see counts as "other", and the time the model takes to load counts with the stop
 before it.
+
+### Image chats
+
+The sidebar's **Image** group makes pictures with Qwen-Image-2.1 (`apps/host/server/image-model.mjs`,
+`src/lib/image-chat.ts`, `src/components/ImageChat.tsx`). Each message is a description; the reply shows
+a live preview and the step while it draws, then the images. The chat's size, number of images, steps,
+guidance, seed and "leave out" text are under the composer and kept with the chat.
+
+The model runs in stable-diffusion.cpp's `sd-server`, which keeps it loaded between images. It and the
+text model never share the GPU (together they need about 54 GB):
+
+- Writing in an Image chat stops the text model, then loads the image model (about 24 GB of VRAM).
+- Writing in any other chat unloads the image model, then starts the text model.
+- The image model is also unloaded after 30 minutes idle and when a game starts; the text model then
+  stays stopped until you write.
+- The toolbar badge has **Unload** while it is loaded.
+
+The launcher sets it up: `STRATA_IMAGE_SERVER` (`engine-image/sd-server`), `STRATA_IMAGE_DIFFUSION`,
+`STRATA_IMAGE_LLM`, `STRATA_IMAGE_VAE`, and optionally `STRATA_IMAGE_STEPS` and `STRATA_IMAGE_CFG` for a
+new chat's defaults (40 and 4, for the regular, non-Turbo model). Without them there are no Image chats.
+The images are kept in `~/.strata/data/generated-images`.
+
+Measured on the RTX 5090, F16 denoiser, Q8_0 text encoder, 40 steps, guidance 4: a 1024x1024 image takes
+about 32 s (0.8 s a step), and about 41 s for the first image after loading. Swapping takes about 10 s to
+stop the text model and a few seconds to load the image model; going back, the text model takes about a
+minute to start.
+
+`engine-image/sd-server` is built from the stable-diffusion.cpp commit `tools/image/qimage.py` pins:
+
+    .venv/bin/python tools/image/install.py --backend cuda --arch 120 --build-only
+    cmake --build build-image-cuda --target sd-server -j && cp build-image-cuda/bin/sd-server engine-image/
 
 Closing the window hides it to the tray (Settings -> General -> Minimise to tray, on; the file is
 `~/.local/share/strata/shell-prefs.json`). On Linux the tray item is a StatusNotifier: click it, then

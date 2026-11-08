@@ -138,6 +138,8 @@ export interface RemoteModelSelection { connectionId: string; modelId: string }
 /** The chat profiles (server/profiles.mjs): each chat is in one, which gives its prompt, thinking, sampling, tools and skills. */
 export type ChatProfileId = 'chat' | 'code' | 'rp' | 'vibe';
 export const CHAT_PROFILE_IDS: ChatProfileId[] = ['chat', 'code', 'vibe', 'rp'];
+/** A chat's group in the sidebar: a profile, or Image (images from the image model; no text profile). */
+export type SessionProfileId = ChatProfileId | 'image';
 export type ProfileSampling = { temperature: number | null; top_p: number | null; top_k: number | null; min_p: number | null; presence_penalty: number | null; frequency_penalty: number | null; repetition_penalty: number | null; seed: number | null };
 export interface ChatProfile {
   id: ChatProfileId; name: string; systemPrompt: string; promptPlacement: 'add' | 'replace'; effort: 'Medium' | 'High'; thinkingBudget: number;
@@ -157,7 +159,18 @@ export interface ProfileCommand { name: string; description: string; prompt: str
 export interface ToolGroupInfo { id: string; area: string; name: string; about: string }
 export interface ProfilesState { profiles: Record<ChatProfileId, ChatProfile>; toolGroups: ToolGroupInfo[] }
 /** The one model the app runs on when the launcher pins it (server/pinned-model.mjs). */
-export interface PinnedModelState { enabled: boolean; phase: 'off' | 'checking' | 'starting' | 'ready' | 'error' | 'stopping' | 'released'; name: string | null; modelId: string | null; connectionId: string | null; error: string | null; context: number | null; released?: { reason: 'idle' | 'game'; detail: string | null; at: number } | null }
+export interface PinnedModelState { enabled: boolean; phase: 'off' | 'checking' | 'starting' | 'ready' | 'error' | 'stopping' | 'released'; name: string | null; modelId: string | null; connectionId: string | null; error: string | null; context: number | null; released?: { reason: 'idle' | 'game' | 'image'; detail: string | null; at: number } | null }
+/** The image model of Image chats (server/image-model.mjs). */
+export interface ImageModelState {
+  enabled: boolean; phase: 'disabled' | 'off' | 'freeing' | 'loading' | 'ready' | 'stopping' | 'error'; name: string | null; error: string | null;
+  loadedAt: number | null; usedAt: number | null; job: { step: number; steps: number; index: number; n: number; startedAt: number } | null;
+  unloaded: { reason: 'text' | 'idle' | 'game' | 'person'; detail: string | null; at: number } | null;
+  defaults: { steps: number; cfg: number; width: number; height: number } | null;
+}
+/** An Image chat's settings for its next images. */
+export interface ImageSettings { width: number; height: number; steps: number; cfg: number; n: number; negative: string; seed: number | null }
+/** An Image chat's reply while it is drawn and after: what was asked, the step, the live preview. */
+export interface ImageJob { phase: 'waiting' | 'freeing' | 'loading' | 'drawing' | 'done'; width?: number; height?: number; step: number; steps: number; index: number; n: number; preview: string | null; seconds?: number; request?: { width: number; height: number; steps: number; cfg: number; seed: number; negative: string } }
 export interface ModelConnectionDraft {
   id?: string; kind: 'provider' | 'custom'; provider: string | null; name: string;
   baseUrl: string; protocol: ModelProtocol; apiKey: string; clearKey?: boolean; models: ApiModel[];
@@ -361,6 +374,8 @@ export interface ChatMessage {
   /** The person's message is written with Markdown (a task handover: bold headings and lists), so the bubble draws it as such. */
   markdown?: boolean;
   photos?:import('./chat-photos').ChatPhoto[];
+  /** An Image chat's reply: the drawing's progress and settings. */
+  image?: ImageJob;
   /** Reply came from a saved API connection, rather than the local engine. */
   remoteModel?: boolean;
   timeSkipId?: string;
@@ -540,8 +555,10 @@ export interface RpLibrary { characters: RpCharacter[]; personas: RpPersona[]; l
 export interface Session {
   /** Roleplay chats: the characters, persona, lorebooks and author's note (absent: an ordinary chat). */
   rp?: RpChat;
-  /** The profile this chat belongs to (Chat, Code, RP); a chat from before profiles is a Chat. */
-  profile?: ChatProfileId;
+  /** The profile this chat belongs to (Chat, Code, RP, Image); a chat from before profiles is a Chat. */
+  profile?: SessionProfileId;
+  /** An Image chat's settings for its next images. */
+  imageSettings?: ImageSettings;
   /** The person dismissed this chat's (or its loop's) card on the board at this time. A later problem brings it back. */
   ackedAt?: string;
   loop?: LoopRecord;

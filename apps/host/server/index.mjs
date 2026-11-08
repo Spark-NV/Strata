@@ -90,6 +90,7 @@ import { createProfileStore, profileSampling, PROFILE_IDS } from './profiles.mjs
 import { BOOK_DIR as VIBE_BOOK_DIR, loadBook as vibeLoadBook, loadRun as vibeLoadRun, publicState as vibePublicState } from './agent/vibe-state.mjs';
 import { createPinnedModel, pinConfig } from './pinned-model.mjs';
 import { createActivityLog, createModelReleaser, releaseConfig, scanGames } from './model-release.mjs';
+import { createImageModel, imageModelConfig } from './image-model.mjs';
 import { createRpStore } from './rp/store.mjs';
 import { createRpRoutes } from './rp/routes.mjs';
 import { createMemoryStore, memoryPrompt } from './memory.mjs';
@@ -137,12 +138,22 @@ const modelProviders = createModelProviders({ directory: store.DATA_DIR, knownTh
 const profileStore = createProfileStore({ dataDir: store.DATA_DIR, changed: value => hub.send('profiles', value) });
 /** The one model this app uses, when the launcher pins it (pinned-model.mjs): started if it is not running, used by every chat. */
 const PIN = pinConfig();
-const pinned = createPinnedModel({ config: PIN, modelProviders, log: line => console.log(line) });
+// The image model (Image chats) gives the GPU back before the pinned model starts.
+let imageModel = null;
+const pinned = createPinnedModel({ config: PIN, modelProviders, log: line => console.log(line), beforeStart: async () => { await imageModel?.unload('text'); } });
 pinned.onChange(state => hub.send('pinned', state));
 /* Its memory given back when it is not wanted (model-release.mjs): at once when a game starts, after 30 minutes idle. Not started
    with the app while a game runs; the first chat starts it then. */
 const RELEASE = releaseConfig();
 const runningGames = () => scanGames({ extra: RELEASE.extraGames });
+/** When the pinned model ran and was stopped, and why (the Monitor's Model time). */
+const modelActivity = PIN ? createActivityLog({ file: join(store.DATA_DIR, 'model-activity.json') }) : null;
+/* Image chats' model (image-model.mjs): loaded when an Image chat needs it, after the pinned model is stopped; unloaded when the
+   pinned model is wanted again, after the idle time and when a game starts. */
+imageModel = createImageModel({ config: imageModelConfig(), pinned: PIN ? pinned : null, dataDir: store.DATA_DIR, activity: modelActivity,
+  idleMs: RELEASE.idleMs, games: RELEASE.gameRelease ? runningGames : () => new Map(), log: line => console.log(line) });
+imageModel.onChange(state => hub.send('image-model', state));
+const stopImageWatch = imageModel.start();
 if (PIN) {
   const playing = RELEASE.gameRelease ? [...runningGames().values()] : [];
   if (playing.length) console.log(`pinned model ·  not started: ${playing.join(', ')} is running`);
@@ -2044,6 +2055,34 @@ async function api(req, res, path, method, url) {
   // When the pinned model ran and was stopped, and why (model-release.mjs), for the Monitor.
   if (path === '/api/pinned/activity' && method === 'GET') return releaser ? json(res, 200, releaser.status()) : error(res, 404, 'No model is pinned.');
   if (path === '/api/pinned/start' && method === 'POST') { try { await pinned.ensure(); return json(res, 200, pinned.state()); } catch (e) { return error(res, 503, e.message); } }
+  // Image chats (image-model.mjs): the model's state, load and unload, a request streamed as it draws, and the images made.
+  if (path === '/api/image-model' && method === 'GET') return json(res, 200, imageModel.state());
+  if (path === '/api/image-model/load' && method === 'POST') { void imageModel.load().catch(() => {}); return json(res, 200, imageModel.state()); }
+  if (path === '/api/image-model/touch' && method === 'POST') { imageModel.touch(); return json(res, 200, imageModel.state()); }
+  if (path === '/api/image-model/unload' && method === 'POST') { await imageModel.unload('person'); return json(res, 200, imageModel.state()); }
+  if (path === '/api/images/generate' && method === 'POST') {
+    if (!imageModel.state().enabled) return error(res, 404, 'No image model is set up.');
+    const b = await readBody(req);
+    const controller = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) controller.abort(); });
+    res.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive' });
+    keepStreamAlive(res);
+    const write = frame => { if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(frame)}\n`); };
+    try {
+      const done = await imageModel.generate(b, write, controller.signal);
+      write({ type: 'done', seconds: done.seconds, request: done.request, images: done.images });
+    } catch (e) { if (e.name !== 'AbortError') write({ type: 'error', message: e.message }); }
+    if (!res.writableEnded) res.end();
+    return undefined;
+  }
+  const imageFile = /^\/api\/images\/file\/([0-9a-f]{24}\.png)$/.exec(path);
+  if (imageFile && method === 'GET') {
+    const file = imageModel.file(imageFile[1]);
+    if (!file) return error(res, 404, 'No such image.');
+    res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'private, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' });
+    createReadStream(file).pipe(res);
+    return undefined;
+  }
   // The assistant's model requests, with the person's Response settings added (llm-shape.mjs). This computer only.
   const llmRoute = /^\/api\/internal\/agent-llm\/([A-Za-z0-9_.~-]+)(\/.*)$/.exec(path);
   if (llmRoute) { llmProxy(req, res, llmRoute[1], llmRoute[2] + (url.search ?? '')); return undefined; }
@@ -2469,7 +2508,7 @@ if (PIN) {
     pinned, idleMs: RELEASE.idleMs, gameRelease: RELEASE.gameRelease, games: runningGames,
     metrics: async () => { try { const r = await fetch(metricsUrl, { signal: AbortSignal.timeout(5000) }); return r.ok ? await r.json() : null; } catch { return null; } },
     agentBusy: () => agent.runningTurns().length > 0,
-    activity: createActivityLog({ file: join(store.DATA_DIR, 'model-activity.json') }),
+    activity: modelActivity,
     log: line => console.log(line),
   });
   stopReleaseWatch = releaser.start();
@@ -2483,7 +2522,7 @@ server.listen(PORT, HOST, () => {
 let stopping=false;
 const shutdown = async () => {
   if(stopping)return;stopping=true;
-  clearInterval(taskTimer);tasks.close();stopReleaseWatch();
+  clearInterval(taskTimer);tasks.close();stopReleaseWatch();stopImageWatch();imageModel.kill();
   const timeout=setTimeout(()=>process.exit(0),control?45000:10000);timeout.unref();   // stopping an engine through Control: drained (15 s), then ended; the shell's deadline is longer
   server.close();server.closeAllConnections?.();
   await Promise.allSettled([localShare.stop(),cloudflare.stop(),native.close(),agent.close()]);

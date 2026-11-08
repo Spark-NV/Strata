@@ -21,7 +21,7 @@ export function pinConfig(env = process.env) {
   return { base, service: String(env.STRATA_PIN_SERVICE ?? '').trim() || null, name: String(env.STRATA_PIN_NAME ?? '').trim() || null };
 }
 
-export function createPinnedModel({ config, modelProviders, log = console.log, fetchImpl = fetch, systemctl = runSystemctl }) {
+export function createPinnedModel({ config, modelProviders, log = console.log, fetchImpl = fetch, systemctl = runSystemctl, beforeStart = async () => {} }) {
   let state = { enabled: !!config, phase: config ? 'checking' : 'off', name: config?.name ?? null, modelId: null, connectionId: null, error: null, context: null, released: null };
   let starting = null, stopping = null, usedAt = 0;
   const listeners = new Set();
@@ -59,6 +59,8 @@ export function createPinnedModel({ config, modelProviders, log = console.log, f
         if (!(await answers())) {
           if (!config.service) throw new Error(`The model server at ${config.base} does not answer.`);
           set({ phase: 'starting', error: null, released: null });
+          // The image model (image-model.mjs) gives the GPU back first.
+          await beforeStart();
           log(`pinned model ·  starting ${config.service}`);
           const err = await startService();
           if (err) throw new Error(`Could not start ${config.service}: ${err}`);
@@ -75,8 +77,8 @@ export function createPinnedModel({ config, modelProviders, log = console.log, f
     return starting;
   }
   /**
-   * Stops the service so its GPU memory and RAM are free; `reason` is 'idle' or 'game' and `detail` what the app shows with it (the
-   * minutes, the game's name). Not while it is starting; a chat sent meanwhile waits for the stop and then starts it again.
+   * Stops the service so its GPU memory and RAM are free; `reason` is 'idle', 'game' or 'image' and `detail` what the app shows with
+   * it (the minutes, the game's name, the image model). Not while it is starting; a chat sent meanwhile waits for the stop and then starts it again.
    */
   async function release(reason, detail = null) {
     if (!config?.service || starting) return false;
@@ -94,6 +96,8 @@ export function createPinnedModel({ config, modelProviders, log = console.log, f
   return {
     state: () => state,
     release,
+    /** A stopped model's reason changes (the image model that had the GPU was unloaded while idle or for a game). */
+    relabel(reason, detail = null) { if (state.phase === 'released') set({ released: { reason, detail, at: Date.now() } }); },
     /** When a chat last asked for the model (ensure), in ms. */
     usedAt: () => usedAt,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },

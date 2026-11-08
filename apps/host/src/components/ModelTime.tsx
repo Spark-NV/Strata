@@ -4,9 +4,9 @@ import { api } from '../lib/client';
 import { useStore } from '../lib/store';
 
 /** How long the pinned model ran and was stopped (server/model-release.mjs, GET /api/pinned/activity). */
-interface Totals { running: number; idle: number; game: number; other: number }
+interface Totals { running: number; idle: number; game: number; image: number; other: number }
 export interface ModelActivity {
-    current: { up: boolean; since: number; reason: 'idle' | 'game' | 'other' | null; detail: string | null } | null;
+    current: { up: boolean; since: number; reason: 'idle' | 'game' | 'image' | 'other' | null; detail: string | null } | null;
     working: boolean;
     idleMs: number | null;
     idleLimitMs: number;
@@ -30,6 +30,7 @@ const PARTS: { key: keyof Totals; label: string }[] = [
     { key: 'running', label: 'Running' },
     { key: 'idle', label: 'Stopped, idle' },
     { key: 'game', label: 'Stopped for games' },
+    { key: 'image', label: 'Stopped for images' },
     { key: 'other', label: 'Stopped, other' },
 ];
 
@@ -64,9 +65,9 @@ export function ModelTime() {
     const cur = data.current, since = cur ? Date.now() - cur.since : null;
     // The totals and the idle time move with the clock between reads, in the bucket of the state now.
     const gone = Math.max(0, Date.now() - data.readAt), bucket: keyof Totals | null = !cur ? null : cur.up ? 'running' : cur.reason ?? 'other';
-    const grow = (t: Totals): Totals => bucket ? { ...t, [bucket]: t[bucket] + gone } : t;
+    const grow = (t: Totals): Totals => bucket ? { ...t, [bucket]: (t[bucket] ?? 0) + gone } : t;
     const idleMs = data.idleMs !== null ? data.idleMs + gone : null;
-    const stoppedWhy = cur?.reason === 'game' ? (cur.detail ? tr('For a game: {0}', [cur.detail]) : tr('For a game')) : cur?.reason === 'idle' ? tr('After {0} idle', [cur.detail ?? span(data.idleLimitMs)]) : tr('Outside the app, or while it was closed');
+    const stoppedWhy = cur?.reason === 'image' ? (cur.detail ? tr('For images: {0}', [cur.detail]) : tr('For images')) : cur?.reason === 'game' ? (cur.detail ? tr('For a game: {0}', [cur.detail]) : tr('For a game')) : cur?.reason === 'idle' ? tr('After {0} idle', [cur.detail ?? span(data.idleLimitMs)]) : tr('Outside the app, or while it was closed');
     const head = !cur ? tr('Nothing recorded yet') : cur.up ? tr('Running for {0}', [span(since ?? 0)]) : tr('Stopped for {0}', [span(since ?? 0)]);
     const detail = !cur ? '' : !cur.up ? stoppedWhy : data.working ? tr('Working now') : idleMs !== null ? data.idleLimitMs ? tr('Idle for {0} · stops after {1}', [span(idleMs), span(data.idleLimitMs)]) : tr('Idle for {0}', [span(idleMs)]) : '';
     const idlePct = cur?.up && idleMs !== null && data.idleLimitMs ? Math.min(100, idleMs / data.idleLimitMs * 100) : null;

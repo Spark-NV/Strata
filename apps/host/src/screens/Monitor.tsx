@@ -195,7 +195,7 @@ function LegacyMonitorScreen({ native }: {
     const pinnedDown = pinnedModel?.enabled && ['released', 'stopping', 'starting', 'checking'].includes(pinnedModel.phase) ? pinnedModel.phase : null;
     const downBadge = pinnedDown === 'released' ? 'Stopped' : pinnedDown === 'stopping' ? 'Stopping' : 'Starting';
     const downLine = pinnedDown === 'released' ? 'Stopped · starts when you write a message' : pinnedDown === 'stopping' ? 'Stopping the model to free its memory' : 'Starting the model…';
-    const downDetail = pinnedDown === 'released' ? pinnedModel?.released?.reason === 'game' ? `For a game${pinnedModel.released.detail ? `: ${pinnedModel.released.detail}` : ''}` : `After ${pinnedModel?.released?.detail ?? 'idle time'} idle` : '';
+    const downDetail = pinnedDown === 'released' ? pinnedModel?.released?.reason === 'image' ? `For images${pinnedModel.released.detail ? `: ${pinnedModel.released.detail}` : ''}` : pinnedModel?.released?.reason === 'game' ? `For a game${pinnedModel.released.detail ? `: ${pinnedModel.released.detail}` : ''}` : `After ${pinnedModel?.released?.detail ?? 'idle time'} idle` : '';
     const progress = data.phase === 'reading' ? data.prompt.pct : writing ? percent(data.generation?.done, data.generation?.total) : 0;
     const statusDetail = data.phase === 'reading' && data.prompt.total ? `${tokens(data.prompt.done)} / ${tokens(data.prompt.total)} tokens · ${Math.round(data.prompt.pct)}%` : writing && hasReading(data.generation?.done) ? `${tokens(data.generation.done)} tokens · ${tps(data.outputTps)} tok/s` : last ? `Last: ${tokens(last.tokensOut)} tokens${hasReading(last.tps) ? ` at ${tps(last.tps)} tok/s` : ''}` : '';
     const cache = data.conversationCache;

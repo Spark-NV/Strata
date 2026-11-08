@@ -57,6 +57,8 @@ import type {
   ChatProfile,
   ChatProfileId,
   PinnedModelState,
+  ImageModelState,
+  SessionProfileId,
   ProfilesState,
   MonitorState,
   ServingState,
@@ -122,6 +124,8 @@ export interface AppState {
   remoteModel: RemoteModelSelection | null;
   /** The one model every chat runs on, when the launcher pins it (server/pinned-model.mjs). */
   pinned: PinnedModelState | null;
+  /** The image model of Image chats (null: the host has none set up, or has not said yet). */
+  imageModel: ImageModelState | null;
   /** The chat profiles and the tool groups their settings switch (server/profiles.mjs). */
   profiles: ProfilesState | null;
   /** The roleplay library (server/rp/): characters, personas, lorebooks and the roleplay settings. */
@@ -333,6 +337,7 @@ let state: AppState = {
   /** The open chat's API model, or null for the local model (the default for every chat). */
   remoteModel: null,
   pinned: null,
+  imageModel: null,
   profiles: null,
   rpLibrary: null,
   engine: null,
@@ -411,6 +416,14 @@ export function wakePinned() {
   if (!p?.enabled || p.phase !== 'released' || wakeAsked === p.released?.at) return;
   wakeAsked = p.released?.at ?? 0;
   void api.post('/api/pinned/start', {}).catch(() => {});
+}
+/** Writing in an Image chat: the image model starts loading (the text model stops first), or its idle time starts again. */
+let imageWakeAsked = 0;
+export function wakeImage() {
+  const m = state.imageModel;
+  if (!m?.enabled) return;
+  if (m.phase === 'ready') { if (Date.now() - imageWakeAsked > 60_000) { imageWakeAsked = Date.now(); void api.post('/api/image-model/touch', {}).catch(() => {}); } return; }
+  if ((m.phase === 'off' || m.phase === 'error') && Date.now() - imageWakeAsked > 5_000) { imageWakeAsked = Date.now(); void api.post('/api/image-model/load', {}).catch(() => {}); }
 }
 function applyPinned(pinned: PinnedModelState) {
   const selection = pinned.enabled && pinned.connectionId && pinned.modelId ? { connectionId: pinned.connectionId, modelId: pinned.modelId } : null;
@@ -884,6 +897,9 @@ function applyEvent(e: StreamEvent) {
     case 'pinned':
       applyPinned(data as unknown as PinnedModelState);
       break;
+    case 'image-model':
+      set({ imageModel: data as unknown as ImageModelState });
+      break;
     case 'profiles':
       if (state.profiles) set({ profiles: { ...state.profiles, profiles: data as unknown as ProfilesState['profiles'] } });
       break;
@@ -969,6 +985,7 @@ export async function bootstrap() {
       skills: soft<Skill[]>('/api/skills'),
       providers: soft<ModelProviders>('/api/model-providers'),
       pinned: soft<PinnedModelState>('/api/pinned'),
+      imageModel: soft<ImageModelState>('/api/image-model'),
       profiles: soft<ProfilesState>('/api/profiles'),
       rpLibrary: soft<RpLibrary>('/api/rp/library'),
       imageModels: soft<ImageModelLibrary>('/api/image-models'),
@@ -997,6 +1014,7 @@ export async function bootstrap() {
     void late.skills.then(skills => { if (skills) set({ skills }); });
     void late.providers.then(providers => { if (providers) applyProviders(providers); });
     void late.pinned.then(pinned => { if (pinned) applyPinned(pinned); });
+    void late.imageModel.then(imageModel => { if (imageModel) set({ imageModel }); });
     void late.profiles.then(profiles => { if (profiles) set({ profiles }); });
     void late.rpLibrary.then(rpLibrary => { if (rpLibrary) set({ rpLibrary }); });
     void late.imageModels.then(imageModels => { if (imageModels) set({ imageModels }); });
@@ -1413,10 +1431,10 @@ async function syncChatsFromHost() {
   sessionWriter.enable();
 }
 
-export function newSession(profileId: ChatProfileId = 'chat'): Session {
+export function newSession(profileId: SessionProfileId = 'chat'): Session {
   // A new chat starts with its profile's thinking level, approval mode and tools switch, on the pinned model when there is one.
-  const profile = state.profiles?.profiles[profileId];
-  const pinned = pinnedSelection();
+  const profile = profileId === 'image' ? undefined : state.profiles?.profiles[profileId];
+  const pinned = profileId === 'image' ? null : pinnedSelection();
   const session: Session = {
     id: uid('s'),
     profile: profileId,
@@ -1762,6 +1780,7 @@ export async function retryLast(messageId?: string) {
   const source = state.sessions.find(s => s.id === state.activeSession);
   if (!source || state.streaming) return;
   if (source.rp && rpHooks) return rpHooks.retry(source.id, messageId);
+  if (source.profile === 'image' && imageHooks) return imageHooks.retry(source.id, messageId);
   const end = messageId ? source.messages.findIndex(m => m.id === messageId) : source.messages.length - 1;
   const user = source.messages.slice(0, end + 1).reverse().find(m => m.role === 'user');
   if (!user) return;
@@ -2010,6 +2029,8 @@ export async function sendMessage(text: string, options: { fromLoop?: boolean; g
   const reattach = options.reattach;
   // A roleplay chat is sent by rp.ts (its own prompt and reply handling), never by the agent.
   if (!reattach && rpHooks && state.sessions.find(s => s.id === state.activeSession)?.rp) { if (!state.streaming) await rpHooks.send(text); return; }
+  // An Image chat is sent to the image model by image-chat.ts, never to a text model.
+  if (!reattach && imageHooks && state.sessions.find(s => s.id === state.activeSession)?.profile === 'image') { if (!state.streaming) await imageHooks.send(text); return; }
   // The profile's own slash commands (Settings -> Profiles -> Commands): "/name text" goes out as the command's prompt; the chat shows what was typed.
   if (!reattach && !options.shown) {
     const m = /^\/([a-z0-9][a-z0-9-]*)(?:\s+([\s\S]*))?$/.exec(text.trim());
@@ -2330,6 +2351,8 @@ export async function sendMessage(text: string, options: { fromLoop?: boolean; g
 /** Roleplay chats (rp.ts registers these, so the store does not import it). */
 let rpHooks: { send: (text: string) => Promise<void>; retry: (sessionId: string, messageId?: string) => Promise<void>; continue: (sessionId: string) => Promise<void> } | null = null;
 export function registerRpHooks(hooks: NonNullable<typeof rpHooks>) { rpHooks = hooks; }
+let imageHooks: { send: (text: string) => Promise<void>; retry: (sessionId: string, messageId?: string) => Promise<void> } | null = null;
+export function registerImageHooks(hooks: NonNullable<typeof imageHooks>) { imageHooks = hooks; }
 /** For rp.ts only: the store's own chat primitives. */
 export const storeInternals = {
   patchSession: (id: string, fn: (s: Session) => Session) => patchSession(id, fn),

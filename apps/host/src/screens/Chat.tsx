@@ -53,7 +53,8 @@ import '../lib/rp';
 import { Btn, Icon, IconBtn, ErrorNotice, type IconName } from '../components/ui';
 import { composerCap, scrollBehavior } from '../lib/responsive';
 import { relTime, cx, duration, tokens, tps } from '../lib/format';
-import { profileOf, wakePinned, addQuote, clearQuotes, removeQuote, createSubagentExample, parkMessage, takeParked, pushToast, setPreviewTabClosed, branchFrom, continueLast, markRead, retryLast, selectSession, rewindTo, sendMessage, stopStreaming, useStore, } from '../lib/store';
+import { ImageControls, ImageEmpty, ImageReply } from '../components/ImageChat';
+import { profileOf, wakeImage, wakePinned, addQuote, clearQuotes, removeQuote, createSubagentExample, parkMessage, takeParked, pushToast, setPreviewTabClosed, branchFrom, continueLast, markRead, retryLast, selectSession, rewindTo, sendMessage, stopStreaming, useStore, } from '../lib/store';
 import { CopyBtn, CopyMenuItem, MenuCloseContext } from '../components/CopyBtn';
 import { KEYS_UP, PILL_DISTANCE, distanceFromBottom, followAfterScroll, wheelLeavesBottom } from '../lib/follow-scroll';
 import { getSlashCommands } from '../lib/commands';
@@ -510,8 +511,8 @@ export function ChatScreen() {
             pushToast('info', 'Add a prompt after /time-skip');
             return;
         }
-        if (timeSkip === null) {
-            // No model to answer: say so plainly (or show the download), and do not start a run.
+        if (timeSkip === null && session?.profile !== 'image') {
+            // No model to answer: say so plainly (or show the download), and do not start a run. An Image chat has its own model.
             const why = noModelNotice(chatNative ?? null, { libraryLoaded: !!loaded });
             if (why) { pushToast('info', tr(why.title), tr(why.message)); return; }
         }
@@ -572,7 +573,7 @@ export function ChatScreen() {
             <div className="chat__inner">
               {session.rp ? <RpBar session={session}/> : null}
               {session.profile === 'vibe' && (vibeFolder || session.messages.length) ? <VibeBar session={session} onPreview={openPreview}/> : null}
-              {session.rp ? session.messages.map((m, i) => <RpMessage key={m.id} m={m} session={session} isLast={i === session.messages.length - 1}/>) : session.profile === 'rp' && session.messages.length === 0 ? <RpEmpty/> : tr(session.messages.length === 0 ? (session.statsAvailable === false ? <p className="small muted">{tr("Editing from an earlier message. Update the prompt below.")}</p> :
+              {session.rp ? session.messages.map((m, i) => <RpMessage key={m.id} m={m} session={session} isLast={i === session.messages.length - 1}/>) : session.profile === 'rp' && session.messages.length === 0 ? <RpEmpty/> : session.profile === 'image' && session.messages.length === 0 ? <ImageEmpty/> : tr(session.messages.length === 0 ? (session.statsAvailable === false ? <p className="small muted">{tr("Editing from an earlier message. Update the prompt below.")}</p> :
             session.profile === 'vibe' && !vibeFolder ? <VibeStart session={session}/> : <UsageDashboard loaded={!!loaded} session={session}/>) : (session.messages.map((m, i) => (<Message key={m.id} message={m} isLast={i === session.messages.length - 1} onEditPrompt={messageHandlers.onEditPrompt} onPreview={messageHandlers.onPreview} onClosePreview={messageHandlers.onClosePreview} onOpenTimeSkip={messageHandlers.onOpenTimeSkip} timeSkipDone={!!allTimeSkipRuns.find(r => r.id === m.timeSkipId)?.completedAt} timeSkipReal={!!allTimeSkipRuns.find(r => r.id === m.timeSkipId)?.job} timeSkipRun={allTimeSkipRuns.find(r => r.id === m.timeSkipId)} onOpenLink={messageHandlers.onOpenLink}/>))))}
               <QueuedMessages chatId={session.id}/>
             </div>
@@ -666,10 +667,13 @@ function Composer({ draft, setDraft, loaded, streaming, onSubmit, onKey, session
 }) {
     const clearDraft = useCallback(() => setDraft(''), [setDraft]);
     const photos = useChatPhotos(session?.id), native = useNative();
-    const canChat = loaded || native?.instances.some(i => i.status === 'ready');
-    // Writing a message starts a released model (model-release.mjs), so it is loading while the message is written.
+    // An Image chat draws with the image model (image-chat.ts), not a text model.
+    const image = session?.profile === 'image', imageReady = useStore(s => !!s.imageModel?.enabled);
+    const canChat = image ? imageReady : loaded || native?.instances.some(i => i.status === 'ready');
+    // Writing a message starts a released model (model-release.mjs), so it is loading while the message is written; in an Image chat
+    // it is the image model that starts loading (the text model is stopped first).
     const writing = draft.trim() !== '';
-    useEffect(() => { if (writing) wakePinned(); }, [writing]);
+    useEffect(() => { if (writing) { if (image) wakeImage(); else wakePinned(); } }, [writing, image]);
     const whileBusy = useStore(s => s.whileBusy), parkedList = useStore(s => (session ? s.parked[session.id] : undefined)) ?? NO_PARKED;
     const quoteList = useStore(s => (session ? s.quotes[session.id] : undefined)) ?? NO_QUOTES;
     const commands = useSlashCommands(clearDraft, setDraft, session);
@@ -702,13 +706,13 @@ function Composer({ draft, setDraft, loaded, streaming, onSubmit, onKey, session
         <div className="composer__inner">
           <ApprovalDock sessionId={session?.id}/>
           {tr(fileError ? <ErrorNotice message={fileError} action={tr("Dismiss")} onRetry={() => setFileError('')}/> : null)}
-          {session?.preferences?.agent === false ? null : <FolderChip chatId={session?.id} disabled={streaming}/>}
-          <GoalBar chatId={session?.id}/>
+          {session?.preferences?.agent === false || image ? null : <FolderChip chatId={session?.id} disabled={streaming}/>}
+          {image ? null : <GoalBar chatId={session?.id}/>}
           {tr(quoteList.length ? <div className="quotes">{tr(quoteList.map(q => <div className="quote" key={q.id}><button type="button" className="quote__body" title={tr("Go to the quoted message")} onClick={() => document.querySelector(`[data-message-id="${CSS.escape(q.messageId)}"]`)?.scrollIntoView({ block: 'center', behavior: scrollBehavior() })}><span className="xs muted">{tr(q.role === 'user' ? "Quoting you" : "Quoting the assistant")}</span><span className="quote__text">{q.text}</span></button><IconBtn name="x" size={14} title={tr("Remove this quote")} onClick={() => removeQuote(session!.id, q.id)}/></div>))}</div> : null)}
           {tr(parkedList.length ? <div className="parked" role="status">{tr(parkedList.map((text, i) => <div className="parked__item" key={`${i}-${text}`}><span className="xs muted">{tr("Waiting to send")}</span><span className="parked__text" title={text}>{text}</span><IconBtn name="x" size={14} title={tr("Take back")} onClick={() => { const back = takeParked(session!.id, i); if (back !== undefined && !draft.trim()) setDraft(back); }}/></div>))}</div> : null)}
           <div className="st-composer" style={{ boxShadow: 'var(--st-sh-bar)' }}>
           {tr(photos.length ? <ChatPhotos photos={photos} onRemove={id => removeChatPhoto(id, session?.id)}/> : null)}
-          {session?.rp ? <RpEditor value={draft} onChange={v => { setSlashOpen(false); setSlashDismissed(false); setDraft(v); }} onSubmit={onSubmit} label="Message Strata" placeholder={tr('Write what you say, do or think. Pick a style, or select text and pick one.')}/> : <textarea ref={textareaRef} rows={1} value={draft} aria-label={tr("Message Strata")} placeholder={tr(canChat ? 'Message Strata…' : 'Try /time-skip, or load a model to chat…')} onFocus={() => setSlashDismissed(false)} onBlur={() => ime.current.reset()} onCompositionStart={() => ime.current.compositionStart()} onCompositionEnd={(e) => ime.current.compositionEnd(e.timeStamp)} onPaste={(e) => {
+          {session?.rp ? <RpEditor value={draft} onChange={v => { setSlashOpen(false); setSlashDismissed(false); setDraft(v); }} onSubmit={onSubmit} label="Message Strata" placeholder={tr('Write what you say, do or think. Pick a style, or select text and pick one.')}/> : <textarea ref={textareaRef} rows={1} value={draft} aria-label={tr("Message Strata")} placeholder={tr(image ? 'Describe the image you want…' : canChat ? 'Message Strata…' : 'Try /time-skip, or load a model to chat…')} onFocus={() => setSlashDismissed(false)} onBlur={() => ime.current.reset()} onCompositionStart={() => ime.current.compositionStart()} onCompositionEnd={(e) => ime.current.compositionEnd(e.timeStamp)} onPaste={(e) => {
             // A picture on the clipboard (a screenshot, a copied image) is attached like a dropped file; text pastes as usual.
             const files = pastedFiles(e.clipboardData);
             if (!files.length)
@@ -753,12 +757,12 @@ function Composer({ draft, setDraft, loaded, streaming, onSubmit, onKey, session
             }
         }}/>}
           <div className="st-composer__bar">
-            <ComposerControls draft={draft} onDraft={setDraft} session={session} onPreview={onPreview} streaming={streaming} onSlash={() => { setSlashDismissed(false); setSlashOpen(true); requestAnimationFrame(() => textareaRef.current?.focus()); }} onError={setFileError} onAttach={(name, text) => { setDraft(`${draft}${draft ? '\n\n' : ''}Attached ${name}\n\n${text}`); requestAnimationFrame(() => textareaRef.current?.focus()); }}/>
+            {image ? <ImageControls session={session} disabled={streaming}/> : <ComposerControls draft={draft} onDraft={setDraft} session={session} onPreview={onPreview} streaming={streaming} onSlash={() => { setSlashDismissed(false); setSlashOpen(true); requestAnimationFrame(() => textareaRef.current?.focus()); }} onError={setFileError} onAttach={(name, text) => { setDraft(`${draft}${draft ? '\n\n' : ''}Attached ${name}\n\n${text}`); requestAnimationFrame(() => textareaRef.current?.focus()); }}/>}
             {tr(streaming ? (<Btn variant="secondary" size="sm" icon="stop" onClick={stopStreaming}>{tr("Stop")}</Btn>) : (<Btn variant="primary" size="sm" icon="send" disabled={(!draft.trim() && !photos.length) || draft.trim() === '/' || (!canChat && timeSkipPrompt(draft) === null)} onClick={onSubmit}>{tr("Send")}</Btn>))}
           </div>
         </div>
         {tr(streaming && draft.trim() && whileBusy !== 'wait' ? <p className="xs muted composer__busy-hint" role="status">{tr(whileBusy === 'queue' ? "Enter sends it when the answer is done." : "Enter stops the answer here and sends it now.")}</p> : null)}
-        <ChatTelemetry session={session}/>
+        {image ? null : <ChatTelemetry session={session}/>}
         </div>
       </div>
       {/* Outside the composer's glass on purpose: a material sampling another
@@ -798,6 +802,8 @@ function MessageView({ message: m, isLast, onEditPrompt, onPreview, onClosePrevi
     const grouped = !!m.blocks?.some(b => b.kind === 'group');
     const [sentTime, setSentTime] = useState(() => relTime(m.at));
     const sentQuote = m.role === 'user' ? parseQuoted(m.content) : null;
+    if (m.role === 'assistant' && m.image)
+        return <ImageReply message={m} isLast={isLast} onPreview={onPreview}/>;
     if (m.role === 'user') {
         return (<div className="st-msg st-msg--user" data-message-id={m.id} onMouseEnter={() => setSentTime(relTime(m.at))} onFocus={() => setSentTime(relTime(m.at))}>
         <div className="st-bubble">{tr(m.photos?.length ? <ChatPhotos photos={m.photos}/> : null)}{sentQuote ? <><SentQuotes quotes={sentQuote.quotes}/><span className="st-bubble__text">{sentQuote.reply}</span></> : m.markdown ? <Markdown text={m.content} onOpenLink={onOpenLink} imageSession={activeSession}/> : <span className="st-bubble__text">{m.content}</span>}</div>

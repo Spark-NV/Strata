@@ -116,6 +116,7 @@
 .model-time [data-part='running'] { --part: var(--st-accent); }
 .model-time [data-part='idle'] { --part: var(--st-ink-muted); }
 .model-time [data-part='game'] { --part: var(--st-warn); }
+.model-time [data-part='image'] { --part: var(--st-info); }
 .model-time [data-part='other'] { --part: var(--st-line-strong, #8884); }
 .model-time__bar span[data-part] { background: var(--part); }
 .model-time__legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 4px 16px; margin: 0; font-size: var(--st-fs-xs); }
