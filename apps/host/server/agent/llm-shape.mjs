@@ -13,6 +13,7 @@
 import { appendFileSync } from 'node:fs';
 import http from 'node:http';
 import { applyProfileToAgentBody } from '../profiles.mjs';
+import { createStreamRewriter, rewriteCompletion, toolIndex } from './text-tool-calls.mjs';
 import https from 'node:https';
 
 /** The thinking budgets the composer offers (0 = no limit is not a budget). */
@@ -95,6 +96,8 @@ export function createLlmProxy({ targetOf, samplingNow, profileOf = () => null, 
     req.on('error', () => res.destroy());
     req.on('end', () => {
       let body = Buffer.concat(chunks);
+      // The tools this request offers: a call the model wrote as text instead is made real on the way back (text-tool-calls.mjs).
+      let offered = null;
       const budget = nearestBudget(req.headers['x-strata-budget']);
       if (req.method === 'POST' && /\/chat\/completions\/?$/.test(rest) && body.length) {
         // A route marked with a chat profile (Chat, Code, RP) also gets that profile's prompt, sampling, tools and skills (../profiles.mjs).
@@ -105,6 +108,7 @@ export function createLlmProxy({ targetOf, samplingNow, profileOf = () => null, 
           // STRATA_PROFILE_DEBUG=<file>: one line per request with the tools offered before and after the profile (for checking a profile's rules).
           if (process.env.STRATA_PROFILE_DEBUG) { const names = b => (b.tools ?? []).map(t => t?.function?.name ?? t?.name); try { appendFileSync(process.env.STRATA_PROFILE_DEBUG, `${JSON.stringify({ at: new Date().toISOString(), profile: profile?.id ?? null, before: names(parsed), after: names(shaped), system: String(shaped.messages?.find(m => m.role === 'system')?.content ?? '').slice(-300), sampling: Object.fromEntries(['temperature', 'top_p', 'top_k', 'min_p', 'presence_penalty', 'reasoning_budget_tokens', 'max_tokens'].filter(k => shaped[k] !== undefined).map(k => [k, shaped[k]])) })}\n`); } catch { /* debug only */ } }
           body = Buffer.from(JSON.stringify(shaped));
+          if (Array.isArray(shaped.tools) && shaped.tools.length) offered = toolIndex(shaped.tools);
         } catch { /* not JSON: pass it on untouched */ }
       }
       // The route's address is the model's own base (it ends in /v1): the assistant's /v1 is that same prefix.
@@ -115,9 +119,33 @@ export function createLlmProxy({ targetOf, samplingNow, profileOf = () => null, 
       const lib = target.protocol === 'https:' ? https : http;
       const upstream = lib.request(target, { method: req.method, headers }, reply => {
         const out = { ...reply.headers }; delete out['transfer-encoding']; delete out.connection;
+        const type = String(reply.headers['content-type'] ?? '');
+        // A compressed reply cannot be read here: it passes on as it came.
+        if (reply.headers['content-encoding'] && reply.headers['content-encoding'] !== 'identity') offered = null;
+        reply.on('error', () => res.destroy());
+        if (offered && reply.statusCode === 200 && type.includes('text/event-stream')) {
+          delete out['content-length'];
+          res.writeHead(200, out);
+          const rewriter = createStreamRewriter(offered, s => res.write(s));
+          reply.setEncoding('utf8');
+          reply.on('data', c => rewriter.push(c));
+          reply.on('end', () => { rewriter.end(); res.end(); });
+          return;
+        }
+        if (offered && reply.statusCode === 200 && type.includes('application/json')) {
+          const parts = [];
+          reply.on('data', c => parts.push(c));
+          reply.on('end', () => {
+            let text = Buffer.concat(parts);
+            try { const obj = JSON.parse(text.toString('utf8')), fixed = rewriteCompletion(obj, offered); if (fixed !== obj) text = Buffer.from(JSON.stringify(fixed)); } catch { /* not JSON: as it came */ }
+            out['content-length'] = String(text.length);
+            res.writeHead(200, out);
+            res.end(text);
+          });
+          return;
+        }
         res.writeHead(reply.statusCode ?? 502, out);
         reply.pipe(res);
-        reply.on('error', () => res.destroy());
       });
       upstream.on('error', e => { if (!res.headersSent) { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: `The model server could not be reached: ${e.message}` })); } else res.destroy(); });
       // The assistant stopped waiting (Stop): stop the model too.

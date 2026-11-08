@@ -47,6 +47,7 @@ import { VibeBar } from '../components/VibeBar';
 import { VibeStart, pickVibeFolder } from '../components/VibeStart';
 import { useChatFolder } from '../lib/chat-folder';
 import { OPEN_VIBE_INBOX, VibeInbox, useVibeWaiting } from '../components/VibeInbox';
+import { HelperConversation, OPEN_HELPER_CONVERSATION, helperTabId, type HelperRef } from '../components/HelperConversation';
 import { RpEditor } from '../components/RpEditor';
 import '../lib/rp';
 import { Btn, Icon, IconBtn, ErrorNotice, type IconName } from '../components/ui';
@@ -188,12 +189,22 @@ export function ChatScreen() {
         window.addEventListener(OPEN_VIBE_INBOX, open);
         return () => window.removeEventListener(OPEN_VIBE_INBOX, open);
     }, [vibe, vibeTabId]);
-    const extraTabs = [...runTabs, ...planTab, ...vibeTab];
+    // A helper's conversation (components/HelperConversation.tsx), opened from "View conversation" in the Subagents list. One at a time.
+    const [helperView, setHelperView] = useState<HelperRef | null>(null);
+    useEffect(() => { setHelperView(null); }, [session?.id]);
+    useEffect(() => {
+        const open = (e: Event) => { const h = (e as CustomEvent<HelperRef>).detail; if (!h?.id) return; setHelperView(h); endPreviewDeferral(); setSelectedPreview(helperTabId(h.id)); };
+        window.addEventListener(OPEN_HELPER_CONVERSATION, open);
+        return () => window.removeEventListener(OPEN_HELPER_CONVERSATION, open);
+    }, []);
+    const helperTab = helperView ? [{ id: helperTabId(helperView.id), title: helperView.name, icon: 'experts' as const, controls: 'helper-content' }] : [];
+    const helperShown = !!helperView && selectedPreview === helperTabId(helperView.id);
+    const extraTabs = [...runTabs, ...planTab, ...vibeTab, ...helperTab];
     const selectedRun = timeSkipRuns.find(run => timeSkipTabId(run.id) === selectedPreview);
-    const inlinePreview = splitWidth >= (selectedRun || planShown || vibeShown ? 760 : 1120);
+    const inlinePreview = splitWidth >= (selectedRun || planShown || vibeShown || helperShown ? 760 : 1120);
     const paneWidth = previewWidth(splitWidth, previewFraction);
     const splitStyle = inlinePreview && selectedPreview && !expanded ? { gridTemplateColumns: `minmax(0,1fr) ${paneWidth}px` } : undefined;
-    const resizeHandle = !setupVisible && inlinePreview && selectedPreview && !expanded ? <PreviewResizeHandle container={splitRef} total={splitWidth} fraction={previewFraction} onChange={setPreviewFraction} controls={selectedRun ? 'time-skip-content' : planShown ? 'plan-content' : vibeShown ? 'vibe-content' : 'artifact-content'}/> : null;
+    const resizeHandle = !setupVisible && inlinePreview && selectedPreview && !expanded ? <PreviewResizeHandle container={splitRef} total={splitWidth} fraction={previewFraction} onChange={setPreviewFraction} controls={selectedRun ? 'time-skip-content' : planShown ? 'plan-content' : vibeShown ? 'vibe-content' : helperShown ? 'helper-content' : 'artifact-content'}/> : null;
     const runCount = timeSkipRuns.length;
     const previewCount = session?.messages.reduce((n, m) => n + (m.artifacts?.length ?? 0), 0) ?? 0;
     useEffect(() => { const items = [...new Map((session?.messages.flatMap(m => m.artifacts ?? []) ?? []).map(a => [a.id, a])).values()]; setPreviews(items.filter(a => !session?.closedPreviews?.includes(a.id))); setSelectedPreview(session && previewsDeferred(session.id) || session?.closedPreviews?.includes(session.previewOpen ?? '') ? null : session?.previewOpen?.startsWith('time-skip:') && !timeSkipRuns.some(r => timeSkipTabId(r.id) === session.previewOpen) ? null : session?.previewOpen ?? null); }, [session?.id]);
@@ -236,6 +247,7 @@ export function ChatScreen() {
     }, [lastReply?.id, lastReply?.streaming]);
     useEffect(() => { setSelectedPreviewId(setupVisible ? null : selectedPreview); return () => setSelectedPreviewId(null); }, [selectedPreview, setupVisible]);
     function closeTab(id: string) {
+        if (helperView && id === helperTabId(helperView.id)) setHelperView(null);
         const next = closePreviewTab([...previews.map(p => ({ id: p.id })), ...extraTabs], selectedPreview, id);
         setPreviews(previews.filter(p => p.id !== id));
         setSelectedPreview(next.selected);
@@ -572,7 +584,8 @@ export function ChatScreen() {
         {tr(!setupVisible && selectedRun && session ? <TimeSkipPanel key={selectedRun.id} run={selectedRun} sessionId={session.id} inline={inlinePreview} expanded={expanded} onCompare={setExpanded} onPreview={openPreview} onClose={() => { setSelectedPreview(null); setExpanded(false); }}/> : null)}
         {tr(!setupVisible && planShown ? <PlanPanel chatId={session?.id}/> : null)}
         {!setupVisible && vibeShown && session ? <VibeInbox session={session} onClose={() => setSelectedPreview(null)}/> : null}
-        <ArtifactPanel items={previews} onCloseTab={closeTab} selected={setupVisible || planShown || vibeShown ? null : selectedPreview} onSelect={selectPreview} onClose={() => setSelectedPreview(null)} inline={inlinePreview}/>
+        {!setupVisible && helperShown && session && helperView ? <HelperConversation session={session} helper={helperView} onClose={() => { setHelperView(null); setSelectedPreview(null); }}/> : null}
+        <ArtifactPanel items={previews} onCloseTab={closeTab} selected={setupVisible || planShown || vibeShown || helperShown ? null : selectedPreview} onSelect={selectPreview} onClose={() => setSelectedPreview(null)} inline={inlinePreview}/>
         {tr(resizeHandle)}
       </div>
     </>);

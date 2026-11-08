@@ -27,6 +27,7 @@ import { bindSession as bindVibeSession, bookSummary, loadBook, loadRun, saveRun
 import { buildProfile, routeFor, MODE_PRESETS, modeOf, effortOf, localOutputBudget, compactionHeadroom } from './profile.mjs';
 import { TurnProjector, parseArguments as parseArgs } from './events.mjs';
 import { ChildProjector } from './children.mjs';
+import { HelperTranscripts } from './helper-transcript.mjs';
 import { nearestBudget } from './llm-shape.mjs';
 import { DeliverableTracker, ActivityGroups, FolderClaims } from './deliverables.mjs';
 import { SkillsUsed, skillInfoFrom } from './skills-used.mjs';
@@ -131,6 +132,8 @@ export function createAgentBridge({ profilePolicyFile = null, memoryFile = null,
   mkdirSync(root, { recursive: true });
   /** Which chat's file tools wrote which file, for chats that share a folder (#5008). */
   const folderClaims = new FolderClaims();
+  /** Helpers' saved conversations, read from the Harness's files only (helper-transcript.mjs): reading never touches a running helper. */
+  const transcripts = new HelperTranscripts({ home });
 
   /**
    * Where the turn's file tracker must never look (deliverables.mjs): the app, the engine and its components, Strata's own data, AppData
@@ -517,7 +520,9 @@ export function createAgentBridge({ profilePolicyFile = null, memoryFile = null,
      */
     turn.watchdog = setInterval(() => {
       if (turn.finished || turn.stopping) return;
-      const toolRunning = [...projector.tools.values()].some(x => x.card?.state === 'running' || x.card?.state === 'proposed') || pending.size > 0 && pendingFor(chatId).length > 0;
+      // A helper's command counts too: the Head waits quietly while a helper runs a long build or browser check.
+      const toolRunning = [...projector.tools.values()].some(x => x.card?.state === 'running' || x.card?.state === 'proposed') || pending.size > 0 && pendingFor(chatId).length > 0
+        || [...turn.children.values()].some(h => !h.done && h.cp.toolRunning);
       const limit = toolRunning ? stallToolMs : stallMs;
       // A local engine reading a long prompt sends the Harness nothing for minutes (#3623). Its /metrics progress counts as activity,
       // for at most engineGraceMs after the Harness last spoke: progress for another chat cannot keep a lost turn alive forever.
@@ -542,7 +547,11 @@ export function createAgentBridge({ profilePolicyFile = null, memoryFile = null,
       clearTimeout(turn.settleTimer);
       clearInterval(turn.watchdog);
       turn.follow?.close();
-      for (const child of turn.children.values()) child.follow?.close();
+      // A helper still going when the turn ends is stopped with it (Stop or the stall check interrupt it): its row says so, as its own end no longer arrives.
+      for (const child of turn.children.values()) {
+        child.follow?.close();
+        if (!child.done && child.cp.stop()) { child.done = true; child.endedAt = Date.now(); emitRow(child, true); }
+      }
       if (turn.stopping && !failure) projector.ended = turn.guard ? { kind: 'completed' } : { kind: 'aborted', reason: { kind: 'user' } };
       reporter.clear();
       const extra = [];
@@ -1255,6 +1264,14 @@ ${note.text}
     }
   }
 
+  /** One helper's conversation for the person to read, from `after` (the last seq the page has) on. Works with the Harness stopped too. */
+  function helperConversation({ chatId, helperId, after = -1 }) {
+    const parent = sessionMap[chatId]?.sessionId;
+    if (!parent) throw new AgentUnavailable('This chat has no helpers yet.', 'helper-unknown');
+    try { return transcripts.read({ parentSessionId: parent, helperId, after }); }
+    catch (e) { throw new AgentUnavailable(e.message, e.code ?? 'helper-unknown'); }
+  }
+
   // -- messages typed while a goal runs ----------------------------------------------------------------------
 
   /** Queue a message for the running goal. It is delivered between steps, or handed back to the page when the goal ends or pauses. */
@@ -1520,7 +1537,7 @@ ${note.text}
   /** Let go of a chat's Harness session mapping (a task starts every run in a session of its own). */
   function forget(chatId) { if (chats.get(chatId)?.turn) return; delete sessionMap[chatId]; chats.delete(chatId); persist(); }
 
-  return { compactCommand, messageHelper, answerQuestion, goalState, goalControl, harnessDir, status, turnOf, runningTurns, attach, runTurn, goalCommand, planCommand, researchCommand, llmTarget, setPlanBriefing, resetSession, reopenPlan, skipStep, planGoal, planControl, planState, queueMessage, cancelQueued, takeQueue, forget, approve, setMode, stop, pendingFor, pendingAll, close, sessionOf: chatId => sessionMap[chatId]?.sessionId ?? null, workingFolder: chatId => sessionMap[chatId]?.cwd ?? null, isRunning: chatId => !!chats.get(chatId)?.turn, _debug: () => ({ rt, sessionMap }) };
+  return { compactCommand, messageHelper, helperConversation, answerQuestion, goalState, goalControl, harnessDir, status, turnOf, runningTurns, attach, runTurn, goalCommand, planCommand, researchCommand, llmTarget, setPlanBriefing, resetSession, reopenPlan, skipStep, planGoal, planControl, planState, queueMessage, cancelQueued, takeQueue, forget, approve, setMode, stop, pendingFor, pendingAll, close, sessionOf: chatId => sessionMap[chatId]?.sessionId ?? null, workingFolder: chatId => sessionMap[chatId]?.cwd ?? null, isRunning: chatId => !!chats.get(chatId)?.turn, _debug: () => ({ rt, sessionMap }) };
 }
 
 /** A goal that stopped by itself, in words. */

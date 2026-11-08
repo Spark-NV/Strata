@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Strata (Spark fork) app icon: rock layers under a spark. Bold shapes so it still reads at 16-32 px in a taskbar. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1b4b"/>
+      <stop offset="1" stop-color="#0b1020"/>
+    </linearGradient>
+    <linearGradient id="l1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="l2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient>
+    <linearGradient id="l3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fde68a" stop-opacity="0.9"/>
+      <stop offset="0.45" stop-color="#fbbf24" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#fbbf24" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="tile"><rect x="16" y="16" width="480" height="480" rx="112"/></clipPath>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <g clip-path="url(#tile)">
+    <!-- three layers, each a wave with a dark seam above it -->
+    <path d="M0 268 C 90 236, 170 300, 256 268 S 420 236, 512 262 L512 340 C 420 318, 340 362, 256 340 S 90 318, 0 344 Z" fill="url(#l1)"/>
+    <path d="M0 356 C 90 330, 170 388, 256 358 S 420 332, 512 352 L512 424 C 420 404, 340 448, 256 426 S 90 404, 0 430 Z" fill="url(#l2)"/>
+    <path d="M0 442 C 90 418, 170 474, 256 446 S 420 422, 512 440 L512 512 L0 512 Z" fill="url(#l3)"/>
+  </g>
+  <!-- the spark -->
+  <circle cx="256" cy="150" r="118" fill="url(#glow)"/>
+  <path d="M256 62 C 266 120, 282 136, 340 150 C 282 164, 266 180, 256 238 C 246 180, 230 164, 172 150 C 230 136, 246 120, 256 62 Z" fill="#fde68a"/>
+  <path d="M256 96 C 262 130, 272 140, 306 150 C 272 160, 262 170, 256 204 C 250 170, 240 160, 206 150 C 240 140, 250 130, 256 96 Z" fill="#ffffff"/>
+</svg>

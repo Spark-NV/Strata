@@ -51,6 +51,7 @@ export class ChildProjector {
     this.failure = null;
     this.endedAt = null;
     this.tools = new Map();         // callId -> { card, calledAt, asked }
+    this.open = new Set();          // calls without a result yet: a command that runs quietly for minutes (a build, a browser check)
     this.asked = new Map();         // approval id -> callId
     this.lastEmit = 0;
   }
@@ -119,6 +120,7 @@ export class ChildProjector {
         const args = parseArguments(d.arguments);
         const card = { ...presentTool({ callId: this.#cardId(d.callId), name: d.name, args }), state: 'running', agentName: this.name };
         this.tools.set(d.callId, { card, calledAt: e.time, asked: false });
+        this.open.add(d.callId);
         this.activity = activityOf(d.name, args);
         set('working');
         row = true;
@@ -145,6 +147,7 @@ export class ChildProjector {
       }
       case 'tool/result': {
         const callId = d.message?.toolCallId;
+        this.open.delete(callId);
         const entry = this.tools.get(callId);
         if (!entry) break;
         if (entry.asked) {
@@ -162,6 +165,7 @@ export class ChildProjector {
       }
       case 'turn/end': {
         const reason = d.reason ?? { kind: 'completed' };
+        this.open.clear();
         this.endedAt = this.now();
         if (reason.kind === 'aborted') set('cancelled');
         else if (reason.kind === 'error') { this.failure = clip(friendlyFailure(reason.error), 140); set('failed'); }
@@ -184,4 +188,19 @@ export class ChildProjector {
   }
 
   get finished() { return this.status === 'completed' || this.status === 'failed' || this.status === 'cancelled'; }
+
+  /** A tool call of this helper is still running (the chat's stall check gives it the longer allowance a running tool gets). */
+  get toolRunning() { return !this.finished && this.open.size > 0; }
+
+  /**
+   * The chat's turn ended while this helper was still going (Stop, or the stall check): its stream is closed with the turn, so its own
+   * end never arrives. The row says it stopped instead of counting up as "working" forever.
+   */
+  stop() {
+    if (this.finished) return false;
+    this.open.clear();
+    this.endedAt = this.now();
+    this.status = 'cancelled';
+    return true;
+  }
 }

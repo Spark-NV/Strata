@@ -286,5 +286,20 @@
   "rp285": "Vibe works in one folder per project: everything it builds, its save points and the project book live there. Continue a recent project, or choose a folder. For something new, make an empty folder in the dialog.",
   "rp286": "Choose a folder…",
   "rp287": "Or continue a recent project",
-  "rp288": "Vibe works in one folder per project. Choose one, then send your message."
+  "rp288": "Vibe works in one folder per project. Choose one, then send your message.",
+  "rp289": "View conversation",
+  "rp290": "Conversation with {0}",
+  "rp291": "Working · updates live",
+  "rp292": "Finished · last activity {0}",
+  "rp293": "Commands",
+  "rp294": "Thinking",
+  "rp295": "Read-only: watching does not change the helper’s work.",
+  "rp296": "Nothing said yet.",
+  "rp297": "The Head’s task",
+  "rp298": "From the Head",
+  "rp299": "From another helper",
+  "rp300": "Message to the Head",
+  "rp301": "Helper",
+  "rp302": "Report to the Head",
+  "rp303": "Review"
 }

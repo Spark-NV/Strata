@@ -2071,6 +2071,11 @@ async function api(req, res, path, method, url) {
     try { return json(res, 200, await agent.messageHelper({ chatId: String(body.sessionId ?? ''), helperId: body.helperId, text: body.message, delivery: body.delivery })); }
     catch (e) { return error(res, e.code === 'helper-idle' || e.code === 'helper-refused' ? 409 : 400, e.message); }
   }
+  // One helper's conversation, read-only (View conversation in the Subagents list). `after` gives only what is new.
+  if (path === '/api/chat/helper/conversation' && method === 'GET') {
+    try { return json(res, 200, agent.helperConversation({ chatId: String(url.searchParams.get('sessionId') ?? ''), helperId: url.searchParams.get('helperId'), after: Number(url.searchParams.get('after') ?? -1) })); }
+    catch (e) { return error(res, e.code === 'helper-missing' ? 404 : 400, e.message); }
+  }
   if (path === '/api/chat/queue/cancel' && method === 'POST') {
     const body = await readBody(req);
     try { return json(res, 200, agent.cancelQueued({ chatId: String(body.sessionId ?? ''), id: String(body.id ?? '') })); }

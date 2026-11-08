@@ -42,3 +42,34 @@ test('engine progress keeps a long prompt read alive past the stall limit, then 
   assert.ok(Date.now() - t0 < 40_000, 'and it still ended by itself once the engine went quiet');
   assert.match(out.find(f => f.type === 'error').message, /stopped answering/);
 });
+
+// A helper's quiet command is a running tool too: the Head waits while a helper runs a long build or browser check, and the shorter
+// "silent model" limit must not stop it (a helper was cut off this way four minutes into a Playwright check).
+test('a helper running a quiet command gets the running-tool allowance, not the silent-model limit', { skip }, async (t) => {
+  const worker = await startScriptedWorker({});
+  const dir = mkdtempSync(join(tmpdir(), 'strata-wd-')); const ws = join(dir, 'ws'); mkdirSync(ws, { recursive: true });
+  const bridge = createAgentBridge({ dataDir: dir, localInstances: () => [{ id: 'i', label: 'S', baseUrl: worker.url, modelId: 'scripted-model', context: 32768, slots: 2 }], connections: () => [], env: process.env, startTimeoutMs: 90_000, stallMs: 2000, stallToolMs: 30_000 });
+  t.after(async () => { await bridge.close(); await worker.close(); try { rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch { /* best effort */ } });
+  const out = [];
+  await bridge.runTurn({ chatId: 'w3', message: `SCRIPT:spawn 1 call bash ${JSON.stringify({ command: 'sleep 6', description: 'A quiet check' })}`, workspacePath: ws, mode: 'bypass', onFrame: f => out.push(f) });
+  assert.ok(!out.some(f => f.type === 'error'), JSON.stringify(out.find(f => f.type === 'error')));
+  const rows = out.filter(f => f.type === 'agent').map(f => f.agent);
+  assert.ok(rows.length, 'the helper showed as a row');
+  assert.equal(rows.at(-1).status, 'completed');
+});
+
+// When the stall check (or Stop) ends the turn, a helper's stream closes with it and its own end never arrives: its row must not stay
+// "working" with its clock counting up.
+test('a helper still going when the stall check ends the turn shows as stopped, not working', { skip }, async (t) => {
+  const worker = await startScriptedWorker({});
+  const dir = mkdtempSync(join(tmpdir(), 'strata-wd-')); const ws = join(dir, 'ws'); mkdirSync(ws, { recursive: true });
+  const bridge = createAgentBridge({ dataDir: dir, localInstances: () => [{ id: 'i', label: 'S', baseUrl: worker.url, modelId: 'scripted-model', context: 32768, slots: 2 }], connections: () => [], env: process.env, startTimeoutMs: 90_000, stallMs: 2500, stallToolMs: 6000 });
+  t.after(async () => { await bridge.close(); await worker.close(); try { rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch { /* best effort */ } });
+  const out = [];
+  await bridge.runTurn({ chatId: 'w4', message: 'SCRIPT:spawn 1 hang', workspacePath: ws, mode: 'bypass', onFrame: f => out.push(f) });
+  assert.match(out.find(f => f.type === 'error')?.message ?? '', /stopped answering/);
+  const last = out.filter(f => f.type === 'agent').map(f => f.agent).at(-1);
+  assert.ok(last, 'the helper showed as a row');
+  assert.equal(last.status, 'cancelled');
+  assert.equal(last.description, 'Stopped.');
+});

@@ -221,6 +221,9 @@ function textOf(content) {
   return '';
 }
 
+/** What a helper without the skill tool sees in place of the skill list. */
+const NO_SKILLS = '<system-reminder>\nNo saved skills are available to you in this task, and you have no skill tool.\n</system-reminder>';
+
 /** A skill catalog block with only the skills the profile may load. */
 export function filterSkillCatalog(text, profile) {
   if (typeof text !== 'string' || !text.includes('<available_skills>')) return text;
@@ -255,11 +258,14 @@ export function applyProfileToAgentBody(body, profile, { memory = null } = {}) {
   const out = { ...body, ...profileSampling(profile) };
   const helper = agentOfRequest(body.messages, profile);
   const prompt = [profile.systemPrompt.trim(), helper ? `You are the @${helper.name} agent.\n${helper.instructions}` : agentsPrompt(profile), memory ?? ''].filter(Boolean).join('\n\n');
+  // A helper without the skill tool is not told about skills: the list invites a call it cannot make, and the call comes back as text.
+  const helperSkills = !helper?.tools || helper.tools.includes('skills') || helper.tools.includes('skill');
+  const skillText = text => (helperSkills ? filterSkillCatalog(text, profile) : NO_SKILLS);
   let messages = out.messages.map(m => {
     if (!m || typeof m !== 'object') return m;
-    if (typeof m.content === 'string' && m.content.includes('<available_skills>')) return { ...m, content: filterSkillCatalog(m.content, profile) };
+    if (typeof m.content === 'string' && m.content.includes('<available_skills>')) return { ...m, content: skillText(m.content) };
     if (Array.isArray(m.content) && m.content.some(p => typeof p?.text === 'string' && p.text.includes('<available_skills>')))
-      return { ...m, content: m.content.map(p => (typeof p?.text === 'string' ? { ...p, text: filterSkillCatalog(p.text, profile) } : p)) };
+      return { ...m, content: m.content.map(p => (typeof p?.text === 'string' ? { ...p, text: skillText(p.text) } : p)) };
     return m;
   });
   if (prompt) {
@@ -272,7 +278,8 @@ export function applyProfileToAgentBody(body, profile, { memory = null } = {}) {
   }
   out.messages = messages;
   if (Array.isArray(out.tools)) {
-    const agentAllows = name => { if (!helper?.tools) return true; const n = String(name ?? ''), g = GROUP_OF.get(n); return !g || helper.tools.includes(g) || helper.tools.includes(n); };
+    // Every helper keeps send_message: the Harness tells each one to send its result to the Head with it before it finishes.
+    const agentAllows = name => { if (!helper?.tools) return true; const n = String(name ?? ''), g = GROUP_OF.get(n); return !g || n === 'send_message' || helper.tools.includes(g) || helper.tools.includes(n); };
     out.tools = out.tools.filter(t => toolAllowed(profile, t?.function?.name ?? t?.name) && agentAllows(t?.function?.name ?? t?.name));
     if (!out.tools.length) { delete out.tools; delete out.tool_choice; delete out.parallel_tool_calls; }
   }

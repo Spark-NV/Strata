@@ -282,3 +282,24 @@ test('the gate stops a helper asking once the chat has left Manual', async () =>
   await handler(exec, async () => ({ kind: 'allow' }));
   assert.equal(appended.length, 1, 'and does it once');
 });
+
+test('a helper with a call in flight counts as running a tool, and stop() ends a row whose own end will not arrive', () => {
+  let now = 1000;
+  const cp = new ChildProjector({ id: 'k1', name: 'Builder', now: () => now });
+  const ev = (type, data = {}) => cp.consume({ type: 'event', event: { type, time: now, data } });
+  ev('turn/start');
+  ev('tool/call', { callId: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'npx playwright test' }) });
+  assert.equal(cp.toolRunning, true);
+  ev('tool/result', { message: { toolCallId: 'c1', content: [{ type: 'text', text: 'ok' }] } });
+  assert.equal(cp.toolRunning, false);
+  ev('tool/call', { callId: 'c2', name: 'bash', arguments: JSON.stringify({ command: 'npm run build' }) });
+  now = 5000;
+  assert.equal(cp.stop(), true);
+  assert.equal(cp.toolRunning, false);
+  const row = cp.agent();
+  assert.equal(row.status, 'cancelled');
+  assert.equal(row.description, 'Stopped.');
+  now = 99_000;
+  assert.equal(cp.agent().durationMs, 4000, 'the clock stopped with the row');
+  assert.equal(cp.stop(), false, 'a finished helper is left as it is');
+});

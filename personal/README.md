@@ -191,6 +191,23 @@ the answer panel on the right (`src/components/VibeInbox.tsx`) with the Head's l
 its question cards with room to read, and for the brief the whole BRIEF.md with Approve and build, Deny,
 or Request changes in your own words (sent to the Head as its next message).
 
+To watch the Head and its helpers talk, open **Subagents** at the top of the chat and press **View
+conversation** on a helper (in any chat with helpers, not only Vibe). The right panel shows the Head's
+task and messages, what the helper says, its messages back and its report, with one short line per
+command it ran; file edits and tool output are left out. **Commands** and **Thinking** switch those
+lines on or off. A working helper's conversation updates every two seconds and follows the end while
+you are at the bottom. It only reads the helper's saved session file
+(`server/agent/helper-transcript.mjs`, `GET /api/chat/helper/conversation`), so watching never changes
+the helper's or the Head's work. Outside the app, `python3 tools/vibe_conversations.py <folder>` writes
+the same conversations for a whole project as one HTML page.
+
+A tool call the model writes as text (it guessed a name such as `read_file`, or reached for a tool the
+helper does not have) used to end a helper mid-work. The agent's model proxy now makes it a real call
+(`server/agent/text-tool-calls.mjs`): a common other name for an offered tool calls that tool, with its
+parameter names matched; any other name gets "unknown tool" back, so the helper carries on in the same
+turn and nothing it is not allowed can run. Every helper keeps `send_message` (the Harness tells each one to
+report with it), and a helper without the skill tool is no longer shown the skill list.
+
 - **Stages, enforced by the gate, not the prompt.** Planning: nothing in the project can change
   (edits and changing commands are refused); the Head reads, researches and asks 3-5 questions per
   round with ask cards. It writes the brief with `vibe_brief` and asks for approval with `vibe_start`
