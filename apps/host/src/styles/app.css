@@ -7761,3 +7761,6 @@ html[data-motion='reduced'] .native-progress__bar[data-indeterminate] > i { anim
 .helper-convo__think { padding: 0 4px; }
 .helper-convo__think > summary { cursor: pointer; }
 .helper-convo__think .document-markdown { color: var(--st-ink-muted); border-left: 2px solid var(--st-line); padding-left: 10px; margin: 4px 0; }
+/* The pinned model's badge while it is released (model-release.mjs): a button that starts it. */
+button.chat-model-badge[data-state='released'] { display: inline-flex; align-items: center; gap: 6px; background: none; font: inherit; font-size: var(--st-fs-xs); cursor: pointer; border-style: dashed; }
+button.chat-model-badge[data-state='released']:hover { color: var(--st-ink); border-color: var(--st-ink-muted); }

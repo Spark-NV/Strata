@@ -404,6 +404,14 @@ export function pinnedSelection(): RemoteModelSelection | null {
   const p = state.pinned;
   return p?.enabled && p.connectionId && p.modelId ? { connectionId: p.connectionId, modelId: p.modelId } : null;
 }
+/** Starts the pinned model when it was released (idle, or for a game), so it is loading while the person writes. Once per release. */
+let wakeAsked = 0;
+export function wakePinned() {
+  const p = state.pinned;
+  if (!p?.enabled || p.phase !== 'released' || wakeAsked === p.released?.at) return;
+  wakeAsked = p.released?.at ?? 0;
+  void api.post('/api/pinned/start', {}).catch(() => {});
+}
 function applyPinned(pinned: PinnedModelState) {
   const selection = pinned.enabled && pinned.connectionId && pinned.modelId ? { connectionId: pinned.connectionId, modelId: pinned.modelId } : null;
   set({ pinned, ...(selection ? { remoteModel: selection } : {}) });

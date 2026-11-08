@@ -8,7 +8,8 @@
 //! * `port`: the port the window's origin uses. 0 is the default, 47831. When the port is busy the shell takes a free one and tells the
 //!   host (`STRATA_PORT_NOTICE=busy:<wanted>:<used>`), which shows the person a warning: the chats and settings of the page are kept per
 //!   port, so a different port starts empty.
-//! * `tray`: closing the window hides it and keeps Strata running in the tray (Windows, macOS). The tray menu follows `language`.
+//! * `tray`: closing the window hides it and keeps Strata running in the tray. The tray menu follows `language`. On Linux the tray is a
+//!   StatusNotifier item (libayatana-appindicator, shipped in the AppImage); a click opens its menu, which has Open and Quit.
 //! * `/shell/notify` on the loopback bridge shows a desktop notification (an approval is waiting) whether the window is open or hidden.
 
 use std::path::PathBuf;
@@ -109,11 +110,11 @@ pub fn tray_labels(language: &str) -> (&'static str, &'static str, &'static str)
     }
 }
 
-#[cfg(not(target_os = "linux"))]
 mod native {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
     use tauri::{AppHandle, Manager};
+    #[cfg(not(target_os = "linux"))]
     use tauri_plugin_notification::NotificationExt;
 
     const TRAY_ID: &str = "strata-tray";
@@ -169,6 +170,7 @@ mod native {
     }
 
     /// Show a desktop notification; a hidden or minimised window also asks for attention (the taskbar button flashes).
+    #[cfg(not(target_os = "linux"))]
     pub fn notify(app: &AppHandle, title: &str, body: &str) -> bool {
         if title.is_empty() {
             return false;
@@ -183,8 +185,9 @@ mod native {
     }
 }
 
+pub use native::{hide_to_tray, tray_exists};
 #[cfg(not(target_os = "linux"))]
-pub use native::{hide_to_tray, notify, tray_exists};
+pub use native::notify;
 
 #[cfg(test)]
 mod tests {

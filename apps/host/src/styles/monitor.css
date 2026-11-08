@@ -102,3 +102,24 @@
 .monitor-readings dd { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 @media (max-width: 1100px) { .monitor-readings dl { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .monitor-readings { padding: 12px 16px; } .monitor-readings dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* The pinned model's running and stopped time (components/ModelTime.tsx). */
+.model-time { display: flex; flex-direction: column; gap: 12px; }
+.model-time h2 { margin: 0; }
+.model-time .st-badge[data-state='running'] { color: var(--st-ok, var(--st-accent)); }
+.model-time__idle { height: 6px; border-radius: 3px; background: var(--st-line); overflow: hidden; }
+.model-time__idle span { display: block; height: 100%; background: var(--st-warn); transition: width var(--st-dur); }
+.model-time__periods { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px 24px; }
+.model-time__period { display: flex; flex-direction: column; gap: 8px; }
+.model-time__period-head { display: flex; justify-content: space-between; font-size: var(--st-fs-sm); }
+.model-time__bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--st-line); }
+.model-time__bar span { display: block; height: 100%; }
+.model-time [data-part='running'] { --part: var(--st-accent); }
+.model-time [data-part='idle'] { --part: var(--st-ink-muted); }
+.model-time [data-part='game'] { --part: var(--st-warn); }
+.model-time [data-part='other'] { --part: var(--st-line-strong, #8884); }
+.model-time__bar span[data-part] { background: var(--part); }
+.model-time__legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 4px 16px; margin: 0; font-size: var(--st-fs-xs); }
+.model-time__legend div { display: flex; justify-content: space-between; gap: 8px; }
+.model-time__legend dt { display: flex; align-items: center; gap: 6px; color: var(--st-ink-muted); }
+.model-time__legend dt::before { content: ''; width: 8px; height: 8px; border-radius: 2px; background: var(--part); }
+.model-time__legend dd { margin: 0; white-space: nowrap; }

@@ -157,7 +157,7 @@ export interface ProfileCommand { name: string; description: string; prompt: str
 export interface ToolGroupInfo { id: string; area: string; name: string; about: string }
 export interface ProfilesState { profiles: Record<ChatProfileId, ChatProfile>; toolGroups: ToolGroupInfo[] }
 /** The one model the app runs on when the launcher pins it (server/pinned-model.mjs). */
-export interface PinnedModelState { enabled: boolean; phase: 'off' | 'checking' | 'starting' | 'ready' | 'error'; name: string | null; modelId: string | null; connectionId: string | null; error: string | null; context: number | null }
+export interface PinnedModelState { enabled: boolean; phase: 'off' | 'checking' | 'starting' | 'ready' | 'error' | 'stopping' | 'released'; name: string | null; modelId: string | null; connectionId: string | null; error: string | null; context: number | null; released?: { reason: 'idle' | 'game'; detail: string | null; at: number } | null }
 export interface ModelConnectionDraft {
   id?: string; kind: 'provider' | 'custom'; provider: string | null; name: string;
   baseUrl: string; protocol: ModelProtocol; apiKey: string; clearKey?: boolean; models: ApiModel[];

@@ -119,6 +119,47 @@ It is pinned to this machine's model (`apps/host/server/pinned-model.mjs`): `STR
 names the server, `STRATA_PIN_SERVICE` the unit it starts when the server does not answer (about a
 minute), and every chat runs on it; the model pickers and the Models screens are hidden.
 
+The app also gives the model's memory back when it is not wanted (`apps/host/server/model-release.mjs`).
+It checks every 3 s and stops the unit:
+
+- **When a game starts.** That is a Steam launch (the `reaper SteamLaunch AppId=…` process, Proton or
+  native), a Lutris game, a Proton game run through umu (Heroic), or gamescope. It stops at once, even in
+  the middle of a turn. Measured on 2026-11-07 with a fake Steam launch: the unit was stopped and the
+  GPU was back to about 1 GB 10 s after the launch.
+- **After 30 minutes with no model work.** That means nothing generating or queued on the server (so
+  requests from other apps count), no agent turn running, and no chat sent.
+
+When it is released, the chat's model badge reads "Asleep · …". Typing a message, sending one, or
+clicking the badge starts it again; it took 58 s on 2026-11-07. A game already running doesn't release
+the model again. So a chat started mid-game keeps the model until it has been idle for 30 minutes, and
+the app doesn't start the model when it opens while a game runs. Settings, in the launcher's
+environment:
+
+- `STRATA_PIN_IDLE_MIN` sets the idle minutes (30; 0 turns the idle stop off).
+- `STRATA_PIN_GAME_RELEASE=0` turns the game stop off.
+- `STRATA_PIN_GAMES=name,name` adds process names (as in `/proc/<pid>/comm`) that count as games.
+
+The watch runs only while the app runs.
+
+The Monitor's **Model time** card (`apps/host/src/components/ModelTime.tsx`, `GET /api/pinned/activity`) shows:
+
+- whether the model is running and for how long, how long it has been idle, and a bar toward the 30 minute stop;
+- while it is stopped, for how long and why: idle, a game (named), or outside the app;
+- today's and the last 7 days' time running, stopped while idle, stopped for games, and stopped for other reasons.
+
+The log is `~/.strata/data/model-activity.json` and keeps 8 days. Time is only recorded while the app runs:
+a stop the app did not see counts as "other", and the time the model takes to load counts with the stop
+before it.
+
+Closing the window hides it to the tray (Settings -> General -> Minimise to tray, on; the file is
+`~/.local/share/strata/shell-prefs.json`). On Linux the tray item is a StatusNotifier: click it, then
+Open Strata or Quit Strata. Starting Strata from the menu also brings the hidden window back. Upstream
+builds the Linux window without a tray, so `~/Applications/strata-runtime/squashfs-root/usr/bin/strata-desktop`
+is this fork's own build. Build it with
+`TAURI_CONFIG='{"bundle":{"resources":null}}' cargo build --release` in `apps/desktop/src-tauri` (about
+1 minute once the crates are built). The AppImage's own binary is kept next to it as
+`strata-desktop.0.2.11-notray.bak`.
+
 The sidebar has four profiles, Chat, Code, Vibe and RP (`apps/host/server/profiles.mjs`), configured in
 Settings -> Profiles: system message, reasoning effort (Medium or Extra High), thinking budget,
 sampling, output cap, tools on or off, approval mode, which tool groups and connected tools, and which

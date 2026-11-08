@@ -3,7 +3,7 @@ import { modelFamilyIcon } from '../lib/model-icons';
 import { useId, useRef, useState } from 'react';
 import { FloatingMenu } from './FloatingMenu';
 import { Bar, Btn, Dialog, ErrorNotice, Icon } from './ui';
-import { go, useLifecycle, loadVariant, selectRemoteModel, setSettingsSection, useStore } from '../lib/store';
+import { go, useLifecycle, loadVariant, selectRemoteModel, setSettingsSection, useStore, wakePinned } from '../lib/store';
 import { pickerGroups, pickerNativeModels, pickerVersionState } from '../lib/model-picker';
 import { versionFit } from '../lib/model-versions';
 import type { ModelVariant } from '../lib/types';
@@ -21,7 +21,13 @@ function PinnedModelBadge() {
     const pinned = useStore(s => s.pinned);
     if (!pinned) return null;
     const name = pinned.name ?? pinned.modelId ?? tr('Model');
-    const text = pinned.phase === 'starting' ? tr('Starting {0}…', [name]) : pinned.phase === 'checking' ? tr('Checking {0}…', [name]) : pinned.phase === 'error' ? tr('{0} is not running', [name]) : name;
+    const text = pinned.phase === 'starting' ? tr('Starting {0}…', [name]) : pinned.phase === 'checking' ? tr('Checking {0}…', [name]) : pinned.phase === 'error' ? tr('{0} is not running', [name]) : pinned.phase === 'stopping' ? tr('Releasing {0}…', [name]) : pinned.phase === 'released' ? tr('Asleep · {0}', [name]) : name;
+    // Released (model-release.mjs): why, and a click starts it now; sending a message or typing one starts it too.
+    if (pinned.phase === 'released') {
+        const why = pinned.released?.reason === 'game' ? tr('Released for {0} to free the graphics card.', [pinned.released.detail ?? tr('a game')]) : tr('Released after {0} without use.', [pinned.released?.detail ?? '30 min']);
+        const title = `${why} ${tr('It starts again when you write a message. Click to start it now.')}`;
+        return <button type="button" className="chat-model-badge" data-state="released" title={title} aria-label={`${text}. ${title}`} onClick={() => wakePinned()}><Icon name="link" size={15}/><span>{text}</span></button>;
+    }
     return <span className="chat-model-badge" data-state={pinned.phase} title={pinned.error ?? name}><Icon name="link" size={15}/><span>{text}</span></span>;
 }
 function NativeChatModelPicker() {

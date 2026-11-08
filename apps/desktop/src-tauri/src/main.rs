@@ -1275,6 +1275,20 @@ fn run_window_process() -> ! {
             open_window(app, port, &token)
         })
         .on_window_event(|window, event| {
+            // "Minimise to tray" (Settings): closing the window hides it and the tray menu brings it back or quits, as on the other
+            // systems. Quit ends this process normally, so the shell stops the host as when the window is closed.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let prefs = shell::read_prefs();
+                    if prefs.tray {
+                        api.prevent_close();
+                        shell::hide_to_tray(&window.app_handle().clone(), &prefs.language);
+                        if !shell::tray_exists(&window.app_handle().clone()) {
+                            let _ = window.destroy();
+                        }
+                    }
+                }
+            }
             if let tauri::WindowEvent::Destroyed = event {
                 window.app_handle().exit(0);
             }
