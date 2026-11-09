@@ -55,6 +55,13 @@ build-vision-cuda12.bat
 *.done
 /third_party/*.zip
 
+# the image model's engine (tools/image/install.py): stable-diffusion.cpp unpacked from its pinned commit, and the sd-server
+# and sd-cli it builds (111 MB each, over GitHub's file limit). A fresh clone gets them back with install.py.
+/third_party/stable-diffusion.cpp/
+/third_party/_unpack-sd/
+/engine-image/
+/build-image-*/
+
 # IDEs
 .vscode/
 .idea/
