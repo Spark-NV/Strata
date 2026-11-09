@@ -116,3 +116,21 @@ the key: `403`. Outside servers going to the public IP directly: connection rese
 (8082) do not answer on the network address at all.
 
 **Not tested yet:** an iPhone, the laptop away from home.
+
+## Weak connections (phase 1, for the iPhone app)
+
+Requests that send `persist: true` are saved by the host itself, so a phone on a bad signal loses nothing and never runs a
+message twice. Nothing changes for requests without it; the desktop app does not use it yet.
+
+- `server/persisted-turn.mjs` runs such a turn: one save with the message and the reply placeholder before the model wakes,
+  `queued` / `saved` / `status` frames at once, the reply saved every 5 s and at the end. Chat, Code and Vibe turns keep running
+  without a connection; roleplay and pictures stop and keep what they have.
+- `server/turn-ledger.mjs` keeps every `turnId` for 24 h on disk (`chats/turns.json`): a repeat joins or replays, never starts
+  twice; `GET /api/chat/turn` answers `unknown` for one never received.
+- `server/turn-record.mjs` builds the reply and the history (`history: "from-chat"`) with the desktop's rules; a test compares
+  them with the desktop's own code.
+- `server/chat-merge.mjs` and `chats/<id>.meta.json`: a save from an older copy is merged by message id (hash per version, 30 days).
+- `PATCH /api/chats/<id>` (top-level fields), `/api/events?topics=…` (no 60 KB `monitor` event every second unless asked),
+  pictures kept in `chats/media/<id>/`, the same approval / answer / Stop again answered `already`.
+
+The iPhone docs (`~/Videos/Working/10-PHASE1.md`) hold every request and frame, with real captures.

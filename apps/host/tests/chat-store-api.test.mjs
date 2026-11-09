@@ -67,7 +67,8 @@ test('the chat routes: named page only, other sites refused, save / read / list 
     assert.equal(JSON.stringify((await (await fetch(`${h.base}/api/chats/s_big`, { headers: named('w1') })).json()).session), body);
 
     const dataFiles = (await readdir(join(home, 'data', 'chats'))).sort();
-    assert.deepEqual(dataFiles, ['index.json', 's_big.json', 's_small.json']);
+    assert.deepEqual(dataFiles, ['index.json', 's_big.json', 's_big.meta.json', 's_small.json', 's_small.meta.json']);
+    if (process.platform !== 'win32') assert.equal((await stat(join(home, 'data', 'chats', 's_big.meta.json'))).mode & 0o777, 0o600, 'the side file is as private as the chat');
     if (process.platform !== 'win32') assert.equal((await stat(join(home, 'data', 'chats', 's_big.json'))).mode & 0o777, 0o600);
 
     assert.deepEqual(await (await fetch(`${h.base}/api/chats/s_small`, { method: 'DELETE', headers: named('w2') })).json(), { id: 's_small', removed: true });

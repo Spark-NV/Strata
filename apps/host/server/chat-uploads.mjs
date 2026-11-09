@@ -8,7 +8,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 
 export const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
@@ -46,7 +46,7 @@ export function parseMultipart(body, contentType) {
 
 const typeFromBytes = b => (b.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'image/png' : b.subarray(0, 3).equals(Buffer.from([255, 216, 255])) ? 'image/jpeg' : b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP' ? 'image/webp' : null);
 
-export function createUploads({ dir, folderOf, attachments }) {
+export function createUploads({ dir, folderOf, attachments, mediaDir = null }) {
   mkdirSync(dir, { recursive: true });
   const index = new Map();   // id -> { id, chatId, name, type, size, file }
   const metaFile = id => join(dir, id + '.json');
@@ -115,10 +115,51 @@ export function createUploads({ dir, folderOf, attachments }) {
         return { url: `data:${img.type};base64,${img.bytes.toString('base64')}`, name: img.name };
       });
     },
-    /** Remove uploads older than a day (the folder never grows without end). */
+    /** The picture as a data address (history built from the chat), or null when it is gone. */
+    dataUrl(id) {
+      const img = this.image(id);
+      return img ? `data:${img.type};base64,${img.bytes.toString('base64')}` : null;
+    },
+    /**
+     * Pictures a saved message names belong to its chat from now on: moved to <mediaDir>/<chat id>/, never swept, removed with the chat.
+     * Ids that are unknown, not pictures or already kept are left as they are.
+     */
+    keep(chatId, ids) {
+      if (!mediaDir) return 0;
+      let kept = 0;
+      for (const id of Array.isArray(ids) ? ids : []) {
+        const m = load(String(id));
+        if (!m || m.kind !== 'image' || m.kept) continue;
+        try {
+          const target = join(mediaDir, chatId);
+          mkdirSync(target, { recursive: true });
+          const file = join(target, basename(m.file));
+          renameSync(m.file, file);
+          const meta = { ...m, chatId, file, kept: true };
+          writeFileSync(metaFile(m.id), JSON.stringify(meta)); index.set(m.id, meta);
+          kept += 1;
+        } catch { /* stays an ordinary upload */ }
+      }
+      return kept;
+    },
+    /** A chat was deleted: its kept pictures go too. */
+    dropChat(chatId) {
+      if (!mediaDir || !chatId) return;
+      for (const f of readdirSync(dir)) {
+        if (!f.endsWith('.json')) continue;
+        const m = load(f.slice(0, -5));
+        if (m?.kept && m.chatId === chatId) { try { unlinkSync(metaFile(m.id)); } catch { /* gone */ } index.delete(m.id); }
+      }
+      try { rmSync(join(mediaDir, chatId), { recursive: true, force: true }); } catch { /* gone */ }
+    },
+    /** Remove uploads older than a day (the folder never grows without end). Pictures a chat keeps are never removed here. */
     sweep(maxAgeMs = 24 * 3600_000) {
       let removed = 0;
-      for (const f of readdirSync(dir)) { const p = join(dir, f); try { if (Date.now() - statSync(p).mtimeMs > maxAgeMs) { unlinkSync(p); removed += 1; } } catch { /* gone already */ } }
+      for (const f of readdirSync(dir)) {
+        const p = join(dir, f);
+        if (f.endsWith('.json') && load(f.slice(0, -5))?.kept) continue;
+        try { if (statSync(p).isFile() && Date.now() - statSync(p).mtimeMs > maxAgeMs) { unlinkSync(p); removed += 1; } } catch { /* gone already */ }
+      }
       return removed;
     },
   };

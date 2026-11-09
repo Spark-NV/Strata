@@ -14,12 +14,17 @@
  * - The index is a list for fast start. If it is missing or does not match the files it is rebuilt from the files; a file that cannot
  *   be read is reported and left exactly as it is.
  * - Nothing is cut: the chat is stored byte for byte as received (a text splice, no re-serialising).
+ * - Merging (chat-merge.mjs): each chat has a side file <id>.meta.json with the revision and a hash of every version of each message and
+ *   top-level field. A save based on an older revision is merged by message id instead of replacing the file, so a device that saves an
+ *   older copy never drops what another device or Strata added meanwhile. Strata's own writes (a persisted turn, a PATCH) go through
+ *   `update`, on the newest file.
  * - Owner-only: the folder is created private (POSIX 0700 and files 0600; on Windows the folder gets a protected ACL that its files
  *   inherit), the same level as the rest of the profile.
  */
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { open, readFile, rename, unlink, mkdir, copyFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { advanceMeta, baselineMeta, emptyMeta, mergeChat, mergePatch, readMeta } from './chat-merge.mjs';
 
 export const CHAT_FORMAT = 1;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -64,6 +69,10 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
   try { const parsed = JSON.parse(readFileSync(deletedFile, 'utf8')); if (parsed?.deleted && typeof parsed.deleted === 'object') deleted = parsed.deleted; } catch { /* none yet */ }
 
   const fileOf = id => join(root, `${id}.json`);
+  const metaOf = id => join(root, `${id}.meta.json`);
+  // Which replies a running turn is writing (set by the turn ledger): a save never replaces them.
+  let liveReply = () => false;
+  let onRemove = () => {};
   const bytesOf = text => Buffer.byteLength(text, 'utf8');
   const entryOf = (id, rev, session, bytes) => ({ id, rev, createdAt: session?.createdAt ?? null, updatedAt: session?.updatedAt ?? null, bytes, title: typeof session?.title === 'string' ? session.title.slice(0, 200) : '' });
 
@@ -76,7 +85,7 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
     let names = [];
     try { names = readdirSync(root); } catch { /* empty */ }
     for (const name of names) if (/\.tmp-\d+-\d+$/.test(name)) { try { unlinkSync(join(root, name)); } catch { /* left */ } }
-    const files = names.filter(n => n.endsWith('.json') && n !== 'index.json' && !/\.tmp-/.test(n)).map(n => n.slice(0, -5)).filter(validChatId);
+    const files = names.filter(n => n.endsWith('.json') && !n.endsWith('.meta.json') && n !== 'index.json' && n !== 'index.deleted.json' && n !== 'turns.json' && !/\.tmp-/.test(n)).map(n => n.slice(0, -5)).filter(validChatId);
     let saved = null;
     try { const parsed = JSON.parse(readFileSync(join(root, 'index.json'), 'utf8')); if (parsed?.v === CHAT_FORMAT && Array.isArray(parsed.chats)) saved = parsed.chats; } catch { /* rebuilt below */ }
     const map = new Map();
@@ -125,8 +134,41 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
     }
   }
 
+  /** The side file of a chat; one saved before side files existed gets a baseline from its stored copy (everything counts as old). */
+  async function metaFor(id, storedSession) {
+    try { const m = readMeta(await io.readFile(metaOf(id), 'utf8')); if (m) return m; } catch { /* none yet */ }
+    if (storedSession !== undefined) return storedSession ? baselineMeta(storedSession, now().getTime()) : emptyMeta();
+    if (!index.has(id)) return emptyMeta();
+    try { return baselineMeta(JSON.parse(await io.readFile(fileOf(id), 'utf8')).session, now().getTime()); } catch { return emptyMeta(); }
+  }
+  async function writeMeta(id, meta) {
+    try { await writeAtomic(metaOf(id), JSON.stringify(meta)); }
+    catch { try { await io.unlink(metaOf(id)); } catch { /* the next save builds it again */ } }
+  }
+  async function storedSession(id) {
+    const parsed = JSON.parse(await io.readFile(fileOf(id), 'utf8'));
+    if (parsed?.v !== CHAT_FORMAT || !parsed.session) throw new ChatStoreError('The stored chat cannot be read.', 500, 'damaged');
+    return parsed.session;
+  }
+  /** Write `session` as the next revision (inside the queue). */
+  async function writeRevision(id, session, text, { persisted = [], meta } = {}) {
+    const rev = (index.get(id)?.rev ?? 0) + 1;
+    const file = `{"v":${CHAT_FORMAT},"rev":${rev},"savedAt":${JSON.stringify(now().toISOString())},"session":${text}}`;
+    try { await writeAtomic(fileOf(id), file); } catch (e) { throw storeFailure(e); }
+    const bytes = bytesOf(file);
+    index.set(id, entryOf(id, rev, session, bytes));
+    damaged.delete(id);
+    await writeIndex();
+    await writeMeta(id, advanceMeta(meta, session, rev, { persisted, now: now().getTime() }));
+    return { rev, bytes };
+  }
+
   return {
     root,
+    /** `fn(chatId, messageId)` is true for a reply a running turn is writing. */
+    setLive(fn) { liveReply = fn; },
+    /** Called with the id of a chat the person deleted (its pictures go with it). */
+    setOnRemove(fn) { onRemove = fn; },
     /** The chats, newest first. */
     list() {
       const chats = [...index.values()].sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')) || a.id.localeCompare(b.id));
@@ -145,7 +187,7 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
      * Save one chat. `sessionText` is the chat's JSON as the page wrote it. Resolves { id, rev, bytes, conflict }.
      * Rejects with a ChatStoreError (status 400 for a chat that is not a chat, 507 disk full, 403 refused, 500 other): nothing was changed.
      */
-    save(id, sessionText, { baseRev = null } = {}) {
+    save(id, sessionText, { baseRev = null, returnChat = false } = {}) {
       if (!validChatId(id)) return Promise.reject(new ChatStoreError('That is not a chat id.', 400, 'bad-id'));
       let session;
       try { session = JSON.parse(sessionText); } catch { return Promise.reject(new ChatStoreError('The chat must be JSON.', 400, 'bad-json')); }
@@ -154,23 +196,65 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
       if (Object.hasOwn(deleted, id)) return Promise.reject(new ChatStoreError('This chat was deleted.', 410, 'deleted'));
       return queue(async () => {
         const current = index.get(id);
-        const rev = (current?.rev ?? 0) + 1;
-        let conflict = false;
-        if (current && baseRev !== null && Number(baseRev) !== current.rev) { conflict = true; await keepDisplaced(id, current.rev); }
-        const text = `{"v":${CHAT_FORMAT},"rev":${rev},"savedAt":${JSON.stringify(now().toISOString())},"session":${body}}`;
-        try { await writeAtomic(fileOf(id), text); } catch (e) { throw storeFailure(e); }
-        const bytes = bytesOf(text);
-        index.set(id, entryOf(id, rev, session, bytes));
-        damaged.delete(id);
-        await writeIndex();
-        return { id, rev, bytes, conflict };
+        const stale = !!current && baseRev !== null && Number(baseRev) !== current.rev;
+        if (!stale) {
+          const meta = await metaFor(id);
+          const { rev, bytes } = await writeRevision(id, session, body, { meta });
+          return { id, rev, bytes, conflict: false };
+        }
+        // Saved from an older copy: the version it would displace is kept (as before), and the save is merged by message id.
+        await keepDisplaced(id, current.rev);
+        let stored;
+        try { stored = await storedSession(id); } catch (e) { throw storeFailure(e); }
+        const meta = await metaFor(id, stored);
+        const result = mergeChat({ stored, incoming: session, base: Number(baseRev), meta, live: mid => liveReply(id, mid) });
+        const text = result.changed ? JSON.stringify(result.session) : body;
+        const { rev, bytes } = await writeRevision(id, result.session, text, { meta });
+        // `rev` is the revision the saving device's copy matches: after a merge that added what it did not have, that is still its base,
+        // so its next save is merged too and it never drops those messages. `storedRev` is the chat's real revision.
+        return { id, rev: result.changed && !returnChat ? Number(baseRev) : rev, storedRev: rev, bytes, conflict: result.conflict, merged: true, changed: result.changed, ...(returnChat ? { session: result.session } : {}) };
       });
+    },
+    /**
+     * Strata's own write: `fn(session)` returns the changed chat (or null for no change), applied to the newest file. `persisted` names
+     * messages a persisted turn wrote. Resolves { id, rev, session } or null when nothing changed. 404 / 410 when the chat is gone.
+     */
+    update(id, fn, { persisted = [] } = {}) {
+      if (!validChatId(id)) return Promise.reject(new ChatStoreError('That is not a chat id.', 400, 'bad-id'));
+      return queue(async () => {
+        if (Object.hasOwn(deleted, id)) throw new ChatStoreError('This chat was deleted.', 410, 'deleted');
+        if (!index.has(id)) throw new ChatStoreError('No such chat.', 404, 'not-found');
+        let stored;
+        try { stored = await storedSession(id); } catch (e) { throw storeFailure(e); }
+        const next = fn(structuredClone(stored));
+        if (!next) return null;
+        if (next.id !== id) throw new ChatStoreError('The chat does not match its id.', 400, 'bad-chat');
+        const meta = await metaFor(id, stored);
+        const { rev } = await writeRevision(id, next, JSON.stringify(next), { persisted, meta });
+        return { id, rev, session: next };
+      });
+    },
+    /** JSON Merge Patch on the top-level fields of a chat (never `messages` or `id`). */
+    patch(id, patch, { baseRev = null } = {}) {
+      if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return Promise.reject(new ChatStoreError('The patch must be a JSON object.', 400, 'bad-patch'));
+      if (Object.hasOwn(patch, 'messages')) return Promise.reject(new ChatStoreError('Messages cannot be patched here.', 400, 'use-messages'));
+      if (Object.hasOwn(patch, 'id')) return Promise.reject(new ChatStoreError('A chat id cannot be changed.', 400, 'bad-patch'));
+      const readOnly = Object.keys(patch).length > 0 && Object.keys(patch).every(k => k === 'lastReadAt');
+      const conflict = baseRev !== null && index.has(id) && Number(baseRev) !== index.get(id).rev;
+      return this.update(id, session => {
+        const next = mergePatch(session, patch);
+        next.id = id; next.messages = session.messages;
+        if (!readOnly && !Object.hasOwn(patch, 'updatedAt')) next.updatedAt = now().toISOString();
+        return next;
+      }).then(r => (r ? { id, rev: r.rev, conflict, readOnly } : { id, rev: index.get(id)?.rev ?? 0, conflict, readOnly }));
     },
     /** Delete a chat (the person deleted it). A chat that is not there is already gone. */
     remove(id) {
       if (!validChatId(id)) return Promise.reject(new ChatStoreError('That is not a chat id.', 400, 'bad-id'));
       return queue(async () => {
         try { await io.unlink(fileOf(id)); } catch (e) { if (e?.code !== 'ENOENT') throw storeFailure(e); }
+        try { await io.unlink(metaOf(id)); } catch { /* none */ }
+        try { onRemove(id); } catch { /* its pictures are cleaned up later */ }
         const had = index.delete(id);
         deleted = { ...deleted, [id]: now().toISOString() };
         try { await writeAtomic(deletedFile, JSON.stringify({ v: CHAT_FORMAT, deleted })); } catch (e) { throw storeFailure(e); }

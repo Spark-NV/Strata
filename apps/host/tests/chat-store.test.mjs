@@ -49,7 +49,7 @@ test('the files: one per chat, a version field, an index, no stray temporary fil
     const store = createChatStore({ dir });
     await store.save('s_one', text(chat('s_one', 2, 10)));
     await store.save('s_two', text(chat('s_two', 2, 10)));
-    assert.deepEqual(files(dir), ['index.json', 's_one.json', 's_two.json']);
+    assert.deepEqual(files(dir), ['index.json', 's_one.json', 's_one.meta.json', 's_two.json', 's_two.meta.json']);
     const file = JSON.parse(readFileSync(join(dir, 'chats', 's_one.json'), 'utf8'));
     assert.deepEqual([file.v, file.rev, file.session.id], [1, 1, 's_one']);
     const index = JSON.parse(readFileSync(join(dir, 'chats', 'index.json'), 'utf8'));
@@ -125,8 +125,13 @@ test('two windows: each saves its own chats and neither removes the other\'s; th
     const savedA = await store.save('s_a', text(fromA), { baseRev: a1.rev });
     assert.equal(savedA.conflict, false);
     const savedB = await store.save('s_a', text(fromB), { baseRev: a1.rev });   // B still thinks rev 1
-    assert.equal(savedB.conflict, true);
-    assert.equal(JSON.stringify((await readChat(store, 's_a')).session), text(fromB), 'the later save is the chat');
+    // Merged by message id (chat-merge.mjs): A's two new messages stay, B's title change is taken, and nobody changed the same thing.
+    assert.equal(savedB.conflict, false);
+    assert.equal(savedB.merged, true);
+    assert.equal(savedB.rev, a1.rev, 'B\'s copy still lacks A\'s messages, so its next save is merged as well');
+    const merged = (await readChat(store, 's_a')).session;
+    assert.equal(merged.messages.length, 6, 'nothing A added is lost');
+    assert.equal(merged.title, 'edited in B');
     const kept = readdirSync(join(dir, 'chats', 'conflicts'));
     assert.equal(kept.length, 1);
     assert.equal(JSON.parse(readFileSync(join(dir, 'chats', 'conflicts', kept[0]), 'utf8')).session.messages.length, 6, 'window A\'s version is kept');

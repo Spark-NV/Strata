@@ -55,7 +55,10 @@ import { detectBackend, currentBackend, streamChat, inferenceLine } from './infe
 import { CONTEXT_TOKENS, VARIANTS, localModels, variant } from './catalog.mjs';
 import { browseLocalModels, inspectLocalModel } from './local-models.mjs';
 import { keepStreamAlive } from './stream-beat.mjs';
-import { EventHub, badRequest, error, json, readBody, readRaw, requestUrl, sameSecret, uid } from './util.mjs';
+import { EventHub, badRequest, error, eventOptions, json, readBody, readRaw, requestUrl, sameSecret, uid } from './util.mjs';
+import { createTurnLedger } from './turn-ledger.mjs';
+import { createPersistedTurns, refusal } from './persisted-turn.mjs';
+import { chatHistory, createChatRecorder, createImageRecorder, photosOf, shortTitle, validMessageId } from './turn-record.mjs';
 import { createUploads } from './chat-uploads.mjs';
 import { createNativeDrops } from './native-drop.mjs';
 import { createVisionProbe, effectiveVision, readsPicturesByDefault } from './vision-probe.mjs';
@@ -166,7 +169,7 @@ const rpStore = createRpStore({ dataDir: store.DATA_DIR });
 /** Memory across chats (memory.mjs): in the prompt of a profile with memory on; the agent saves to it with its memory tools. */
 const memoryStore = createMemoryStore({ dataDir: store.DATA_DIR });
 const profileMemory = profile => (profile?.memory?.read || profile?.memory?.write ? memoryPrompt(profile.memory.read ? memoryStore.list() : [], !!profile.memory.write && profile.agent) : null);
-const rpRoutes = createRpRoutes({ rp: rpStore, modelProviders, pinned: PIN ? pinned : null, profileStore, profileSampling, log: line => console.log(line) });
+const rpRoutes = createRpRoutes({ rp: rpStore, modelProviders, pinned: PIN ? pinned : null, profileStore, profileSampling, persisted: { handle: options => persisted.handle(options) }, log: line => console.log(line) });
 const imageModels = createImageModels({ dataDir: store.DATA_DIR, modelsDir: () => store.MODELS_DIR, real: models.REAL, changed: value => hub.send('image-models', value) });
 /* The installed app ships Strata Control (python + strata_control) next to the host; a source checkout has none and keeps its older paths. */
 const CONTROL = findControl();
@@ -565,8 +568,136 @@ let workspaces = loadWorkspaces();
 /* The folder each chat works in ("Select a folder"): the agent's working folder and sandbox for that chat. */
 const chatAttachments = createAttachments();
 const nativeDrops = createNativeDrops();
-const uploads = createUploads({ dir: join(store.DATA_DIR, 'uploads'), folderOf: chatId => chatRoot(chatId), attachments: chatAttachments });
+const uploads = createUploads({ dir: join(store.DATA_DIR, 'uploads'), folderOf: chatId => chatRoot(chatId), attachments: chatAttachments, mediaDir: join(chatStore.root, 'media') });
 try { uploads.sweep(); } catch { /* best effort */ }
+
+/* Persisted turns (RESPONSE5.md, phase 1): Strata saves the turn into the chat itself, a repeated turnId never starts twice, and stale saves are
+   merged by message id. Only requests that ask for it (`persist: true`) use this; everything else runs as before. */
+const turnLedger = createTurnLedger({ file: join(chatStore.root, 'turns.json'), changed: turn => hub.send('turns', turn) });
+chatStore.setLive((chatId, messageId) => turnLedger.isLive(chatId, messageId));
+chatStore.setOnRemove(chatId => uploads.dropChat(chatId));
+const persisted = createPersistedTurns({ chatStore, ledger: turnLedger, emitChat: (id, rev) => hub.send('chats', { id, rev, from: null }), log: line => console.log(line) });
+// A turn that was running when the host stopped: its reply is closed, so it never shows "writing" for ever.
+for (const t of turnLedger.interrupted()) {
+  const text = 'Strata stopped before this reply finished.';
+  void chatStore.update(t.chatId, s => {
+    if (!s.messages?.some(m => m.id === t.replyId && m.streaming)) return null;
+    return { ...s, messages: s.messages.map(m => (m.id === t.replyId && m.streaming ? { ...m, streaming: false, error: m.error ?? text, errorCode: m.errorCode ?? 'interrupted' } : m)) };
+  }).then(r => { turnLedger.end(t.turnId, { state: 'error', error: text, code: 'interrupted', rev: r?.rev ?? null }); if (r) hub.send('chats', { id: t.chatId, rev: r.rev, from: null }); },
+    () => turnLedger.end(t.turnId, { state: 'error', error: text, code: 'interrupted' }));
+}
+/** What this host supports for the phone (09 part 0, RESPONSE5.md item 1). A missing name is not supported. */
+const CAPABILITIES = { turnPersistence: 1, idempotentSend: 1, turnLedger: 1, historyFromChat: 1, rewind: 1, earlyStream: 1, chatMerge: 1, chatPatchTop: 1, chatMedia: 1, controlRepeat: 1, eventTopics: 1 };
+/** Approvals and answers already given (chat:call -> what was decided), so the same decision sent again is answered "already" (24 h). */
+const decided = new Map();
+const rememberDecision = (key, value) => { decided.set(key, { value, at: Date.now() }); for (const [k, v] of decided) if (Date.now() - v.at > 24 * 3600_000) decided.delete(k); };
+
+/** A new message, or Ask again (rewindTo, with an optional edit), of a Chat, Code or Vibe chat: the chat as Strata saves it before the turn. */
+function prepareChatTurn(body, s) {
+  const at = new Date().toISOString();
+  const msgs = Array.isArray(s.messages) ? s.messages : [];
+  const replyId = body.replyId;
+  if (!validMessageId(replyId)) throw refusal(400, 'replyId is required.', 'bad-message');
+  if (msgs.some(m => m.id === replyId)) throw refusal(409, 'That reply id is already a message in this chat.', 'id-taken');
+  let kept, asked = null, before, ids = [];
+  if (typeof body.rewindTo === 'string') {
+    const i = msgs.findIndex(m => m.id === body.rewindTo && m.role === 'user');
+    if (i < 0) throw refusal(400, 'rewindTo must name a message of the person in this chat.', 'bad-message');
+    asked = typeof body.edit === 'string' ? { ...msgs[i], content: body.edit } : msgs[i];
+    before = msgs.slice(0, i); kept = [...before, asked];
+  } else if (body.userMessage && typeof body.userMessage === 'object') {
+    const u = body.userMessage;
+    if (!validMessageId(u.id) || u.role !== 'user' || typeof u.content !== 'string') throw refusal(400, 'userMessage needs an id, role "user" and content.', 'bad-message');
+    const i = msgs.findIndex(m => m.id === u.id);
+    asked = i >= 0 ? msgs[i] : { ...u, at: typeof u.at === 'string' ? u.at : at };
+    before = i >= 0 ? msgs.slice(0, i) : msgs; kept = i >= 0 ? msgs.slice(0, i + 1) : [...msgs, asked];
+    ids.push(asked.id);
+  } else if (body.goalAction === 'resume') { before = msgs; kept = msgs; }
+  else throw refusal(400, 'userMessage (a new message) or rewindTo (Ask again) is required.', 'bad-message');
+  const message = asked ? String(asked.content) : '/goal resume';
+  if (asked && !message.trim() && !photosOf(asked).length) throw refusal(400, 'The message is empty.', 'bad-message');
+  const reply = { id: replyId, role: 'assistant', content: '', at, streaming: true };
+  const session = { ...s, defaultTitle: false, title: msgs.length === 0 && asked ? shortTitle(message.trim() || 'Describe this picture.') : s.title, updatedAt: at, messages: [...kept, reply] };
+  return { session, replyId, messageIds: [...ids, replyId], message: message.trim() || (asked && photosOf(asked).length ? 'Describe this picture.' : ''), photos: asked ? photosOf(asked) : [], before };
+}
+
+/** Wake the pinned model, saying so first when it is not ready. Throws with code model-start-failed. */
+async function wakePinned(onFrame) {
+  if (!PIN) return null;
+  if (pinned.state().phase !== 'ready') onFrame({ type: 'status', phase: 'waking', code: 'model-starting', text: 'Starting the model…', etaMs: 60000 });
+  try { return await pinned.ensure(); } catch (e) { throw Object.assign(new Error(e.message), { code: 'model-start-failed' }); }
+}
+
+/** The turn of a persisted Chat, Code or Vibe request, after Strata saved the message: the same checks and runs as /api/chat/stream. */
+async function executeChatTurn({ body, req, prepared, onFrame, signal }) {
+  const chatId = body.sessionId;
+  body.remoteModel = (await wakePinned(onFrame)) ?? body.remoteModel;
+  const chatProfile = profileStore.get(typeof body.profile === 'string' ? body.profile : 'chat');
+  if (!chatProfile.agent) body.agent = false;
+  const fail = (message, code) => onFrame({ type: 'error', message, ...(code ? { code } : {}) });
+  if (body.offline === true && body.remoteModel) { const own = modelProviders.withSecrets().find(c => c.id === body.remoteModel.connectionId); if (own && !isPrivateHost(own.baseUrl)) return fail(offlineModelRefusal(own.models.find(m => m.id === body.remoteModel.modelId)?.name ?? own.name), 'offline-model'); }
+  if (body.offline === true) body.useTools = false;
+  const imageIds = Array.isArray(body.imageIds) && body.imageIds.length ? body.imageIds : prepared.photos.map(p => p.uploadId).filter(Boolean);
+  let images; try { images = validateChatImages([...(Array.isArray(body.images) ? body.images : []), ...(imageIds.length ? uploads.dataUrls(chatId, imageIds) : [])]); } catch (e) { return fail(e.message); }
+  // Can the model read pictures? Asked only when this turn or its history has one.
+  let canSee = null;
+  const seeing = async () => {
+    if (canSee !== null) return canSee;
+    if (body.remoteModel) { const own = modelProviders.withSecrets().find(c => c.id === body.remoteModel.connectionId); const row = own?.models.find(m => m.id === body.remoteModel.modelId); canSee = !(await pictureRefusal(own, row)); }
+    else { try { canSee = !!native.resolveInstance(body.nativeModelId ?? native.state().defaultId).vision; } catch { canSee = false; } }
+    return canSee;
+  };
+  if (images.length && !(await seeing())) return fail(body.remoteModel ? 'This model cannot read pictures.' : 'This model was started without picture reading. Open Models, turn on Read pictures and load it again, or choose a model that reads pictures.');
+  if (body.history === 'from-chat') {
+    const hasPictures = prepared.before.some(m => photosOf(m).length);
+    body.history = chatHistory(prepared.before, { currentPictures: images.length, canSeePictures: hasPictures ? await seeing() : false, pictureData: id => uploads.dataUrl(id) });
+  }
+  const message = prepared.message;
+  if (!message) return fail('message is required');
+  const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : null;
+  const agentSkip = process.env.STRATA_AGENT === 'off' ? 'The agent is turned off (STRATA_AGENT=off).'
+    : body.agent === false || body.tools === false ? 'This chat runs without the agent.'
+    : !(body.remoteModel || native.hasLive()) ? 'The agent needs a loaded Strata model or an API model.' : null;
+  if (!agentSkip) {
+    const capability = agent.status();
+    if (capability.state !== 'unavailable') {
+      for (const notice of mcpSkippedNotices(capability.skippedServers)) onFrame({ type: 'notice', ...notice });
+      // The agent keeps running when the phone goes away: its frames still reach the recorder, and Stop is /api/chat/stop.
+      await runAgentTurn({ send: onFrame, controller: new AbortController(), chatId, body, message, workspaceId, images });
+      return;
+    }
+    onFrame({ type: 'notice', code: 'agent-unavailable', message: `${capability.reason}`, ...(capability.detail ? { details: capability.detail } : {}) });
+  } else if (body.agent !== false && body.tools !== false && process.env.STRATA_AGENT !== 'off') onFrame({ type: 'notice', code: 'agent-skipped', message: agentSkip });
+  const plain = withPlainStatus(onFrame);
+  try {
+    await runTurn({ message, history: Array.isArray(body.history) ? body.history : [], onFrame: plain, signal, req, client: 'Strata chat', workspaceId, sessionId: chatId, remoteModel: body.remoteModel ?? null, nativeModelId: body.nativeModelId,
+      images, useTools: body.useTools === true, thinking: body.thinking ?? 'high', thinkingBudget: Number.isInteger(body.thinkingBudget) && body.thinkingBudget > 0 ? Math.min(body.thinkingBudget, 262144) : 0, profile: PROFILE_IDS.includes(body.profile) ? chatProfile : null });
+  } finally { plain.dispose(); }
+}
+
+/** A new picture, or Ask again in place of a reply (replyId names it), of an Image chat. */
+function prepareImageTurn(body, s) {
+  const at = new Date().toISOString();
+  const msgs = Array.isArray(s.messages) ? s.messages : [];
+  const replyId = body.replyId;
+  if (!validMessageId(replyId)) throw refusal(400, 'replyId is required.', 'bad-message');
+  const existing = msgs.findIndex(m => m.id === replyId);
+  if (existing >= 0 && (msgs[existing].role !== 'assistant' || body.userMessage)) throw refusal(409, 'That reply id is already a message in this chat.', 'id-taken');
+  let list = msgs, ids = [];
+  const u = body.userMessage;
+  if (u && typeof u === 'object') {
+    if (!validMessageId(u.id) || u.role !== 'user' || typeof u.content !== 'string') throw refusal(400, 'userMessage needs an id, role "user" and content.', 'bad-message');
+    if (!msgs.some(m => m.id === u.id)) list = [...msgs, { ...u, at: typeof u.at === 'string' ? u.at : at }];
+    ids.push(u.id);
+  } else if (existing < 0) throw refusal(400, 'userMessage (a new picture) or the replyId of a reply to draw again is required.', 'bad-message');
+  const steps = Number(body.steps) || null;
+  const reply = { id: replyId, role: 'assistant', content: '', at, streaming: true, image: { phase: 'waiting', width: Number(body.width) || 1024, height: Number(body.height) || 1024, step: 0, steps, index: 0, n: Number(body.n) || 1, preview: null }, model: imageModel.state().name ?? undefined };
+  if (!reply.model) delete reply.model;
+  const messages = existing >= 0 ? list.map(m => (m.id === replyId ? reply : m)) : [...list, reply];
+  const prompt = String(body.prompt ?? u?.content ?? '');
+  const title = s.defaultTitle && u ? { title: prompt.length > 48 ? `${prompt.slice(0, 47)}…` : prompt, defaultTitle: false } : {};
+  return { session: { ...s, updatedAt: at, messages, ...title }, replyId, messageIds: [...ids, replyId], size: { width: reply.image.width, height: reply.image.height } };
+}
 const chatFolders = createChatFolders({ file: join(store.DATA_DIR, 'chat-folders.json') });
 /** Recent projects (projects.mjs): the folders Code chats worked in, shown on a new Code chat's start screen. */
 const projects = createProjects({ file: join(store.DATA_DIR, 'recent-projects.json'), seed: chatFolders.paths() });
@@ -670,8 +801,9 @@ async function runRemoteTurn({ selection, message, history, images = [], thinkin
 }
 
 /** One agent turn for a chat, streamed to the caller as the NDJSON frames the chat already renders. */
-async function runAgentTurn({ res, controller, chatId, body, message, workspaceId, images = [] }) {
-  const write = frame => { if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(frame)}\n`); };
+async function runAgentTurn({ res, send = null, controller, chatId, body, message, workspaceId, images = [] }) {
+  // `send` (a persisted turn) takes the frames instead of a response.
+  const write = send ?? (frame => { if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(frame)}\n`); });
   const cwd = chatFolders.get(chatId) ?? (workspaceId ? workspaces.find(w => w.id === workspaceId)?.path : null) ?? WORKSPACE;
   let choice, instance = null;
   if (body.remoteModel) {
@@ -1097,8 +1229,17 @@ async function api(req, res, path, method, url) {
       if (id && method === 'PUT') {
         const text = (await readRaw(req, 256 * 1024 * 1024)).toString('utf8');
         const base = req.headers['x-strata-base-rev'];
-        const saved = await chatStore.save(id, text, { baseRev: typeof base === 'string' && /^\d+$/.test(base) ? Number(base) : null });
-        hub.send('chats', { id, rev: saved.rev, from });
+        const returnChat = url.searchParams.get('return') === 'chat';
+        const saved = await chatStore.save(id, text, { baseRev: typeof base === 'string' && /^\d+$/.test(base) ? Number(base) : null, returnChat });
+        // A merge that added what the saving device did not have: every window, that one included, is told to reload it.
+        hub.send('chats', { id, rev: saved.storedRev ?? saved.rev, from: saved.changed ? null : from });
+        return json(res, 200, saved);
+      }
+      if (id && method === 'PATCH') {
+        const patch = JSON.parse((await readRaw(req, 4 * 1024 * 1024)).toString('utf8') || 'null');
+        const base = req.headers['x-strata-base-rev'];
+        const saved = await chatStore.patch(id, patch, { baseRev: typeof base === 'string' && /^\d+$/.test(base) ? Number(base) : null });
+        hub.send('chats', { id, rev: saved.rev, from, ...(saved.readOnly ? { readOnly: true } : {}) });
         return json(res, 200, saved);
       }
       if (id && method === 'DELETE') {
@@ -1114,7 +1255,8 @@ async function api(req, res, path, method, url) {
   }
   if (storageChanging && !['GET', 'OPTIONS'].includes(method)) return error(res, 409, 'Wait for the model folder check to finish.');
   // --- events -------------------------------------------------------------
-  if (path === '/api/events') return hub.add(res);
+  if (path === '/api/events') return hub.add(res, eventOptions(url.searchParams));
+  if (path === '/api/capabilities' && method === 'GET') return json(res, 200, { version: appVersion(), features: CAPABILITIES });
   if(path.startsWith('/api/native')){try{
   if(path==='/api/native'&&method==='GET')return json(res,200,await native.refresh(url.searchParams.get('refresh')==='1'));
   if(path==='/api/native'&&method==='PATCH')return json(res,200,await native.configure(await readBody(req)));
@@ -2062,7 +2204,7 @@ async function api(req, res, path, method, url) {
   const memoryRoute = /^\/api\/memory\/([\w-]{1,40})$/.exec(path);
   if (memoryRoute && method === 'PUT') { try { memoryStore.update(memoryRoute[1], (await readBody(req)).text); return json(res, 200, { items: memoryStore.list() }); } catch (e) { return error(res, 400, e.message); } }
   if (memoryRoute && method === 'DELETE') { memoryStore.remove(memoryRoute[1]); return json(res, 200, { items: memoryStore.list() }); }
-  if (path === '/api/pinned' && method === 'GET') return json(res, 200, pinned.state());
+  if (path === '/api/pinned' && method === 'GET') return json(res, 200, { ...pinned.state(), capabilities: CAPABILITIES });
   // The pinned server's own live numbers (the same /metrics an app-started engine has), for the Monitor: the agent's requests go to it
   // through the Harness, so the host's own counters never see them.
   if (path === '/api/pinned/metrics' && method === 'GET') {
@@ -2088,6 +2230,16 @@ async function api(req, res, path, method, url) {
   if (path === '/api/images/generate' && method === 'POST') {
     if (!imageModel.state().enabled) return error(res, 404, 'No image model is set up.');
     const b = await readBody(req);
+    if (b.persist === true) {
+      return persisted.handle({ res, body: b, kind: 'image',
+        prepare: session => prepareImageTurn(b, session),
+        recorder: prepared => createImageRecorder({ replyId: prepared.replyId, size: prepared.size }),
+        execute: async ({ onFrame, signal }) => {
+          const job = { prompt: b.prompt, negative: b.negative, n: b.n, seed: b.seed, width: b.width, height: b.height, steps: b.steps, cfg: b.cfg, loras: b.loras, refs: b.refs };
+          const done = await imageModel.generate(job, onFrame, signal);
+          onFrame({ type: 'done', seconds: done.seconds, request: done.request, images: done.images });
+        } });
+    }
     const controller = new AbortController();
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     res.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive' });
@@ -2138,8 +2290,12 @@ async function api(req, res, path, method, url) {
   // The person's answer to a question the agent asked, or a skip (#4244).
   if (path === '/api/chat/answer' && method === 'POST') {
     const body = await readBody(req);
-    try { return json(res, 200, await agent.answerQuestion({ chatId: String(body.sessionId ?? ''), callId: String(body.callId ?? ''), answers: body.answers, skip: body.skip === true })); }
-    catch (e) { return error(res, e.code === 'question-gone' ? 409 : 400, e.message); }
+    const key = `answer:${String(body.sessionId ?? '')}:${String(body.callId ?? '')}`, said = JSON.stringify({ answers: body.answers ?? null, skip: body.skip === true });
+    try { const result = await agent.answerQuestion({ chatId: String(body.sessionId ?? ''), callId: String(body.callId ?? ''), answers: body.answers, skip: body.skip === true }); rememberDecision(key, said); return json(res, 200, result); }
+    catch (e) {
+      if (e.code === 'question-gone' && decided.get(key)?.value === said) return json(res, 200, { ok: true, already: true });
+      return error(res, e.code === 'question-gone' ? 409 : 400, e.message);
+    }
   }
   // A message for one helper (#4749).
   if (path === '/api/chat/helper' && method === 'POST') {
@@ -2182,8 +2338,13 @@ async function api(req, res, path, method, url) {
   if (path === '/api/chat/approval' && method === 'POST') {
     const b = await readBody(req);
     if (typeof b.sessionId !== 'string' || typeof b.toolId !== 'string' || !['approve', 'deny'].includes(b.decision)) return error(res, 400, 'sessionId, toolId and decision (approve or deny) are required');
-    try { return json(res, 200, await agent.approve({ chatId: b.sessionId, callId: b.toolId, decision: b.decision })); }
-    catch (e) { return error(res, e.code === 'approval-gone' ? 409 : 400, e.message); }
+    const key = `approval:${b.sessionId}:${b.toolId}`;
+    try { const result = await agent.approve({ chatId: b.sessionId, callId: b.toolId, decision: b.decision }); rememberDecision(key, b.decision); return json(res, 200, result); }
+    catch (e) {
+      // The same decision sent again (the first answer never reached the phone): it worked the first time.
+      if (e.code === 'approval-gone' && decided.get(key)?.value === b.decision) return json(res, 200, { ok: true, already: true });
+      return error(res, e.code === 'approval-gone' ? 409 : 400, e.message);
+    }
   }
   /* The desktop shell's own choices (#3402, #3477): the port it asks for, the tray, and a desktop notification through the shell. */
   if (path === '/api/locale' && method === 'GET') return json(res, 200, systemLocale());
@@ -2208,6 +2369,13 @@ async function api(req, res, path, method, url) {
      of what was said while no page was there, then the live frames, as on /api/chat/stream. A turn that ended while the page was away
      (the page names it by requestId) is sent once, whole. 404 when there is nothing to take over. */
   if (path === '/api/chat/active' && method === 'GET') return json(res, 200, { turns: agent.runningTurns() });
+  // What happened to one press of a button (RESPONSE5.md item 4): unknown means Strata never got it, so it is safe to send again.
+  if (path === '/api/chat/turn' && method === 'GET') {
+    const turnId = url.searchParams.get('turnId') ?? '';
+    const known = turnLedger.get(turnId);
+    if (!known || (url.searchParams.get('chatId') && known.chatId !== url.searchParams.get('chatId'))) return json(res, 200, { state: 'unknown', turnId });
+    return json(res, 200, { ...known, state: known.state === 'refused' ? 'error' : known.state });
+  }
   if (path === '/api/chat/attach' && method === 'POST') {
     const b = await readBody(req);
     if (typeof b.sessionId !== 'string' || !b.sessionId) return error(res, 400, 'sessionId is required');
@@ -2233,12 +2401,26 @@ async function api(req, res, path, method, url) {
     // A Time-skip trial of this chat is stopped by the same Stop button (and cleans up its copies).
     const trialId = trialByChat.get(b.sessionId);
     if (trialId) return json(res, 200, { stopped: await stopTrial(trialId), ended: 'time-skip' });
-    try { return json(res, 200, await agent.stop(b.sessionId)); } catch (e) { return error(res, 502, e.message); }
+    // A persisted turn that is not the agent's (plain chat, roleplay, a picture): stopped here. An agent turn is stopped by the agent below.
+    if (!agent.isRunning(b.sessionId)) { const own = persisted.stop(b.sessionId); if (own) return json(res, 200, await own); }
+    try {
+      const result = await agent.stop(b.sessionId);
+      // Nothing running: Stop sent again after the turn ended (a retry on a weak connection) says how the last turn ended.
+      if (result?.stopped === false) { const last = turnLedger.lastFor(b.sessionId); if (last) return json(res, 200, { ...result, already: true, state: last.state, turnId: last.turnId }); }
+      return json(res, 200, result);
+    } catch (e) { return error(res, 502, e.message); }
   }
 
   // --- chat ---------------------------------------------------------------
   if ((path === '/api/chat/stream' || path === '/api/plan/start-goal') && method === 'POST') {
     const body = await readBody(req,12*1024*1024);
+    // Strata saves this turn itself (the phone): message and reply written by the host, safe to retry with the same turnId.
+    if (path === '/api/chat/stream' && body.persist === true) {
+      return persisted.handle({ res, body, kind: 'chat', stopOnLeave: false,
+        prepare: session => prepareChatTurn(body, session),
+        recorder: prepared => createChatRecorder({ replyId: prepared.replyId }),
+        execute: ({ onFrame, signal, prepared }) => { uploads.keep(body.sessionId, prepared.photos.map(p => p.uploadId).filter(Boolean)); return executeChatTurn({ body, req, prepared, onFrame, signal }); } });
+    }
     if (path === '/api/plan/start-goal') { body.message = '/plan start'; if (typeof body.planId !== 'string') return error(res, 400, 'planId is required'); }
     // The chat's profile, and the pinned model: every chat runs on it, started first when it is not running (profiles.mjs, pinned-model.mjs).
     const chatProfile = profileStore.get(typeof body.profile === 'string' ? body.profile : 'chat');

@@ -100,9 +100,14 @@ export async function which(binary, { env = process.env, platform = process.plat
 
 /** Minimal SSE hub. */
 export class EventHub {
-  #clients = new Set();
+  #clients = new Map();   // res -> { topics: Set | null, monitorEveryMs, lastMonitor }
 
-  add(res) {
+  /**
+   * One live event stream. With no options every event is sent, as always. `topics` (a list of event names) sends only those, so a phone
+   * on a weak connection does not get the large `monitor` event every second (about 220 MB an hour); `monitorEveryMs` thins `monitor`
+   * out when it is asked for. A `: ping` comment line every 15 seconds says the stream is alive either way.
+   */
+  add(res, { topics = null, monitorEveryMs = 0 } = {}) {
     res.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-transform',
@@ -110,7 +115,7 @@ export class EventHub {
       'x-accel-buffering': 'no',
     });
     res.write(': connected\n\n');
-    this.#clients.add(res);
+    this.#clients.set(res, { topics: topics ? new Set(topics) : null, monitorEveryMs: Math.max(0, Number(monitorEveryMs) || 0), lastMonitor: 0 });
     const ping = setInterval(() => res.write(': ping\n\n'), 15000);
     res.on('close', () => {
       clearInterval(ping);
@@ -120,7 +125,10 @@ export class EventHub {
 
   send(event, payload) {
     const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
-    for (const res of this.#clients) {
+    const now = Date.now();
+    for (const [res, want] of this.#clients) {
+      if (want.topics && !want.topics.has(event)) continue;
+      if (event === 'monitor' && want.monitorEveryMs) { if (now - want.lastMonitor < want.monitorEveryMs) continue; want.lastMonitor = now; }
       try {
         res.write(frame);
       } catch {
@@ -132,6 +140,13 @@ export class EventHub {
   get size() {
     return this.#clients.size;
   }
+}
+
+/** The `topics` and `monitorEveryMs` of an /api/events request (none: everything, as before). */
+export function eventOptions(searchParams) {
+  const raw = searchParams.get('topics');
+  const topics = raw === null ? null : raw.split(',').map(t => t.trim()).filter(Boolean);
+  return { topics, monitorEveryMs: Number(searchParams.get('monitorEveryMs')) || 0 };
 }
 
 /** The raw bytes of a request body (an upload), up to `limit`. */
