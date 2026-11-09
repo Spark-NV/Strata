@@ -97,6 +97,9 @@ test('an app with the key reaches the host as the local app, with the key and co
   assert.equal(h.authorization, undefined);
   assert.match(h.host, /^127\.0\.0\.1:\d+$/);
   assert.equal(h.origin, `http://${h.host}`, 'the host sees its own address as the origin');
+  assert.equal(h['x-strata-remote'], '1', 'the host knows the request came from away (no folder window on the PC)');
+  await fetch(`${base}/api/folders`, { headers: { authorization: `Bearer ${KEY}`, 'x-strata-remote': '0' } });
+  assert.equal(seen.at(-1).headers['x-strata-remote'], '1', 'a client cannot say it is local');
   assert.equal((await fetch(`${base}/api/app/quit`, { method: 'POST', headers: { authorization: `Bearer ${KEY}`, 'x-strata-client': 'ios' } })).status, 403, 'the app is not quit from away');
   const post = await fetch(`${base}/api/images/generate`, { method: 'POST', headers: { 'x-api-key': KEY, 'content-type': 'application/json' }, body: '{"prompt":"a cat"}' });
   assert.equal(post.status, 200);

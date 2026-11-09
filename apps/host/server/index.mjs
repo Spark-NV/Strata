@@ -8,6 +8,7 @@ import { openArtifact } from './artifacts.mjs';
 import { saveSnapshot } from './snapshot.mjs';
 import { resolvePython, shellPrefix } from './python-resolver.mjs';
 import { chooseFolder, chooserUnavailable, typedFolder } from './folder-dialog.mjs';
+import { folderPath, folderPlaces, listFolder, makeFolder } from './folder-browse.mjs';
 import { createLocalShare } from './local-share.mjs';
 import { createTaskService, validateTask } from './tasks.mjs';
 import { createAgentTaskRunner } from './agent/task-run.mjs';
@@ -1023,6 +1024,11 @@ await cloudflare.inspect();
 
 /* --------------------------------------------------------------- routing --- */
 
+/* The folder window opens on this PC's screen. A request from away (the remote listener marks it) would wait for a window
+   nobody sees, so it gets "no chooser" at once and the page or the phone shows its own folder browser (/api/folders). */
+const FROM_AWAY = 'Choose the folder here: the PC\'s own folder window cannot open from away.';
+const pickFolder = (req, prompt) => req.headers['x-strata-remote'] === '1' ? { unavailable: true, reason: FROM_AWAY, detail: 'remote' } : chooseFolder(prompt);
+
 const server = http.createServer(async (req, res) => {
   const url = requestUrl(req);
   if (!url) return badRequest(res);   // #4397: a bad Host or request target is a 400, never an unhandled rejection
@@ -1116,7 +1122,7 @@ async function api(req, res, path, method, url) {
   /* Settings > Storage > Models folder: pick (or type) a folder, say what it means, then start the choice. Copying is Control's (strata models move). */
   if(path==='/api/native/models-folder/plan'&&method==='POST'){
    const typed=await typedFolder((await readBody(req)).path,{isAbsolute});
-   const picked=typed?{path:typed}:await chooseFolder('Choose a folder for your models');
+   const picked=typed?{path:typed}:await pickFolder(req, 'Choose a folder for your models');
    if(picked.unavailable){const u=chooserUnavailable(picked);return error(res,501,u.message,{code:u.code});}
    if(picked.cancelled)return json(res,200,{cancelled:true});
    return json(res,200,{plan:await native.planModelsFolder(picked.path)});}
@@ -1143,7 +1149,7 @@ async function api(req, res, path, method, url) {
   if(path==='/api/native/local/preview'&&method==='POST'){
    /* "Use a local GGUF": pick (or type) the folder, and Control says what is in it. Nothing is copied or changed. */
    const typed=await typedFolder((await readBody(req)).path,{isAbsolute,fileType:/\.gguf$/i});
-   const picked=typed?{path:typed}:await chooseFolder('Choose the folder that holds your GGUF files');
+   const picked=typed?{path:typed}:await pickFolder(req, 'Choose the folder that holds your GGUF files');
    if(picked.unavailable){const u=chooserUnavailable(picked);return error(res,501,u.message,{code:u.code});};
    if(picked.cancelled)return json(res,200,{cancelled:true});
    return json(res,200,{path:picked.path,preview:await native.localPreview(picked.path)});}
@@ -1869,6 +1875,19 @@ async function api(req, res, path, method, url) {
   if (path === '/api/projects' && method === 'GET') return json(res, 200, { projects: projects.list() });
   if (path === '/api/projects' && method === 'POST') { try { projects.add((await readBody(req)).path); return json(res, 200, { projects: projects.list() }); } catch (e) { return error(res, 400, e.message); } }
   if (path === '/api/projects' && method === 'DELETE') { projects.remove(url.searchParams.get('path') ?? ''); return json(res, 200, { projects: projects.list() }); }
+  // The PC's folders, for the iPhone app and a page opened from away (folder-browse.mjs): look inside one, and make a new one.
+  if (path === '/api/folders' && method === 'GET') {
+    const flag = name => ['1', 'true', 'yes'].includes(url.searchParams.get(name) ?? '');
+    try {
+      const listed = listFolder(folderPath(url.searchParams.get('path')), { files: flag('files'), hidden: flag('hidden') });
+      return json(res, 200, { ...listed, home: homedir(), places: folderPlaces({ workspace: workspaces[0]?.path ?? WORKSPACE }) });
+    } catch (e) { return error(res, e.status ?? 400, e.message, e.code ? { code: e.code } : undefined); }
+  }
+  if (path === '/api/folders' && method === 'POST') {
+    const body = await readBody(req);
+    try { return json(res, 201, { folder: makeFolder(folderPath(body.parent ?? body.path), body.name) }); }
+    catch (e) { return error(res, e.status ?? 400, e.message, e.code ? { code: e.code } : undefined); }
+  }
   // Vibe chats: the project's stage and book, for the bar above the conversation (agent/vibe-state.mjs).
   if (path === '/api/vibe/state' && method === 'GET') {
     const chatId = url.searchParams.get('chatId') ?? '';
@@ -1995,7 +2014,7 @@ async function api(req, res, path, method, url) {
     try {
       // The dialog is the normal path; a typed `path` in the body stands in where none exists.
       const typed = await typedFolder((await readBody(req)).path, { isAbsolute });
-      const picked = typed ? { path: typed } : await chooseFolder('Choose a skill folder (it should contain SKILL.md)');
+      const picked = typed ? { path: typed } : await pickFolder(req, 'Choose a skill folder (it should contain SKILL.md)');
       if (picked.unavailable) {const u=chooserUnavailable(picked);return error(res,501,u.message,{code:u.code});};
       if (picked.cancelled) return json(res, 200, { cancelled: true });
       const chosen = picked.path;
@@ -2020,7 +2039,7 @@ async function api(req, res, path, method, url) {
   if (path === '/api/workspaces/pick' && method === 'POST') {
     try {
       const typed = await typedFolder((await readBody(req)).path, { isAbsolute });
-      const picked = typed ? { path: typed } : await chooseFolder('Choose a folder for Strata');
+      const picked = typed ? { path: typed } : await pickFolder(req, 'Choose a folder for Strata');
       if (picked.unavailable) {const u=chooserUnavailable(picked);return error(res,501,u.message,{code:u.code});};
       if (picked.cancelled) return json(res, 200, { cancelled: true });
       return json(res, 200, { path: picked.path });

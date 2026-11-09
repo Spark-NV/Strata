@@ -9,6 +9,12 @@ The host listens on **HTTPS port 8443** on every network card. Every request nee
 everything the app does works: chats, Code and Vibe chats on projects on this PC, Image chats, picture
 editing, LoRAs, the Monitor. The only exception is **Quit Strata**, which stays on the PC.
 
+The PC's own folder window cannot open from away. The remote listener marks every request it passes on
+(`x-strata-remote: 1`, which a client cannot set or clear), and the routes that would open that window answer
+`501 folder-chooser-unavailable` at once. The page then shows its own folder browser (`GET /api/folders` to look
+inside a folder, `POST /api/folders {parent, name}` to make one; `apps/host/server/folder-browse.mjs`), and the
+iPhone app uses the same two requests. A new folder is never made in a system folder or at `/`.
+
 | From | Address |
 | --- | --- |
 | Home network | `https://192.168.1.2:8443` |

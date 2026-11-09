@@ -209,8 +209,10 @@ export function createRemoteAccess({ config, localPort, pinned = null, log = con
     if (path === '/api/app/quit') return json(res, 403, { error: 'Quit Strata on the PC itself.' });
 
     const headers = { ...req.headers };
-    for (const name of ['authorization', 'x-api-key', 'cookie', 'origin', 'referer', 'host', ...HOP]) delete headers[name];
+    for (const name of ['authorization', 'x-api-key', 'cookie', 'origin', 'referer', 'host', 'x-strata-remote', ...HOP]) delete headers[name];
     headers['x-forwarded-for'] = String(req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? '');
+    // Tells the host this request came from away, so nothing waits on a window that opens on the PC's screen. Only this listener sets it.
+    headers['x-strata-remote'] = '1';
     if (auth === 'key') res.setHeader('access-control-allow-origin', '*');
 
     if (path === '/v1' || path.startsWith('/v1/')) {
