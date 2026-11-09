@@ -13,4 +13,10 @@ export STRATA_IMAGE_DIFFUSION=/home/spark/Apps/MODELS/qwen-image-2.1-F16-model.g
 export STRATA_IMAGE_LLM=/home/spark/Apps/MODELS/Qwen-Image-2.1-encoder-Q8_0.gguf
 export STRATA_IMAGE_VAE=/home/spark/Apps/MODELS/qwen_image_2.1_vae_bf16.safetensors
 export STRATA_IMAGE_NAME="Qwen-Image-2.1"
+# Editing pictures needs the text encoder's vision part; LoRAs made for Qwen-Image-2.1, each with a .strata.json note.
+export STRATA_IMAGE_VISION=/home/spark/Apps/MODELS/mmproj-Qwen3VL-8B-Instruct-F16.gguf
+export STRATA_IMAGE_LORA_DIR=/home/spark/Apps/MODELS/loras/qwen-image-2.1
+# Remote access (apps/host/server/remote-access.mjs): the whole app over HTTPS on port 8443, LAN and outside
+# (https://sprinkler.sparknv.win:8443 through Cloudflare), behind the key in this file. Remove the line to turn it off.
+export STRATA_REMOTE_CONFIG=/home/spark/.config/strata-remote/remote.json
 exec /home/spark/Applications/strata-runtime/squashfs-root/AppRun "$@"

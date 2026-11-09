@@ -4,10 +4,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createImageModel, imageModelConfig, imageRequest, jobBody, serverArgs } from '../server/image-model.mjs';
+import { readFile } from 'node:fs/promises';
+import { transform } from 'esbuild';
+import { createImageModel, imageModelConfig, imageRequest, jobBody, listLoras, saveLoraDefaults, serverArgs } from '../server/image-model.mjs';
 import { createActivityLog } from '../server/model-release.mjs';
 import { createPinnedModel } from '../server/pinned-model.mjs';
 
@@ -84,7 +86,7 @@ test('a request is checked: sides are multiples of 32 within the limits, at most
   const cfg = { steps: 40, cfg: 4 };
   assert.throws(() => imageRequest({ prompt: '  ' }, cfg), /Describe/);
   const r = imageRequest({ prompt: ' a fox ', width: 1000, height: 5000, n: 9, steps: 0, cfg: 'x', seed: '' }, cfg);
-  assert.deepEqual({ ...r, seed: typeof r.seed }, { prompt: 'a fox', negative: '', width: 992, height: 2048, steps: 1, cfg: 4, n: 4, seed: 'number' });
+  assert.deepEqual({ ...r, seed: typeof r.seed }, { prompt: 'a fox', loras: [], refs: [], negative: '', width: 992, height: 2048, steps: 1, cfg: 4, n: 4, seed: 'number' });
   assert.equal(imageRequest({ prompt: 'a', seed: 7 }, cfg).seed, 7);
   // The page sends null for "a new seed each time" and for settings left as they are: never seed 0 or 0 steps.
   const seeds = new Set(Array.from({ length: 8 }, () => imageRequest({ prompt: 'a', seed: null, steps: null, cfg: null }, cfg)));
@@ -191,4 +193,112 @@ test('sd-server that ends while loading is an error with its last lines, and the
   assert.equal(image.state().phase, 'error');
   await assert.rejects(image.load(), /did not start/);
   assert.equal(procs.length, 2);
+});
+
+test('LoRAs are listed from the folder with what their notes say; requests name them, and their words start the prompt', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'strata-loras-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'anime.safetensors'), 'x');
+  writeFileSync(join(dir, 'anime.safetensors.strata.json'), JSON.stringify({ title: 'Anime', kind: 'style', strength: 0.7, prefix: 'fusal style.', steps: 25, cfg: 1 }));
+  writeFileSync(join(dir, 'swap.safetensors'), 'x');
+  writeFileSync(join(dir, 'swap.safetensors.strata.json'), JSON.stringify({ title: 'Swap', kind: 'edit', strength: 9, pictures: ['scene', 'face'], prompt: 'head_swap: <image1> <image2>' }));
+  writeFileSync(join(dir, 'plain.safetensors'), 'x');
+  writeFileSync(join(dir, 'notes.txt'), 'x');
+  const loras = listLoras(dir);
+  assert.deepEqual(loras.map(l => [l.file, l.title, l.kind, l.strength]), [['anime.safetensors', 'Anime', 'style', 0.7], ['plain.safetensors', 'plain', 'style', 1], ['swap.safetensors', 'Swap', 'edit', 2]]);
+  assert.deepEqual(loras[2].pictures, ['scene', 'face']);
+  assert.deepEqual(listLoras(null), []);
+  assert.deepEqual(listLoras(join(dir, 'missing')), []);
+  const cfg = { steps: 40, cfg: 4 };
+  const r = imageRequest({ prompt: 'a girl', loras: [{ file: 'anime.safetensors' }, { file: 'swap.safetensors', strength: 0 }, { file: 'anime.safetensors', strength: 1 }] }, cfg, loras);
+  assert.equal(r.prompt, 'fusal style. a girl');
+  assert.deepEqual(r.loras, [{ file: 'anime.safetensors', title: 'Anime', strength: 0.7 }], 'strength 0 is off; a LoRA counts once');
+  assert.equal(imageRequest({ prompt: 'Fusal style. a girl', loras: [{ file: 'anime.safetensors' }] }, cfg, loras).prompt, 'Fusal style. a girl');
+  assert.throws(() => imageRequest({ prompt: 'a', loras: [{ file: '../../etc/passwd' }] }, cfg, loras), /no LoRA/);
+  assert.throws(() => imageRequest({ prompt: 'a', refs: ['../x.png'] }, cfg, loras), /not one this app stored/);
+  assert.throws(() => imageRequest({ prompt: 'a', refs: Array(5).fill('0123456789abcdef01234567.png') }, cfg, loras), /at most 4/);
+  const body = jobBody({ ...r, refImages: ['AAA', 'BBB'] }, 0);
+  assert.deepEqual(body.lora, [{ path: 'anime.safetensors', multiplier: 0.7 }]);
+  assert.deepEqual(body.ref_images, ['AAA', 'BBB']);
+  assert.equal('lora' in jobBody({ ...imageRequest({ prompt: 'a' }, cfg), refImages: [] }), false);
+  const c = imageModelConfig({ STRATA_IMAGE_SERVER: '/s', STRATA_IMAGE_DIFFUSION: '/d', STRATA_IMAGE_LLM: '/l', STRATA_IMAGE_VAE: '/v', STRATA_IMAGE_VISION: '/mm.gguf', STRATA_IMAGE_LORA_DIR: dir });
+  const args = serverArgs(c);
+  assert.deepEqual(args.slice(args.indexOf('--llm_vision'), args.indexOf('--llm_vision') + 4), ['--llm_vision', '/mm.gguf', '--lora-model-dir', dir]);
+});
+
+test('pictures to edit: only PNG, JPEG or WebP are kept; a request sends them in order as base64, with its LoRAs', async t => {
+  const sd = await fakeSdServer(); t.after(sd.close);
+  const env = setup(t, { pinnedPhase: 'released' }), calls = [];
+  const loraDir = join(env.dir, 'loras');
+  mkdirSync(loraDir);
+  writeFileSync(join(loraDir, 'swap.safetensors'), 'x');
+  const image = createImageModel({ config: { ...env.config, port: sd.port, vision: join(env.dir, 'mm.gguf'), loraDir }, pinned: env.pinned, dataDir: env.dir, spawnImpl: fakeSpawn(sd, calls) });
+  assert.throws(() => image.addRef(Buffer.from('GIF89a....')), /PNG, JPEG or WebP/);
+  assert.throws(() => image.addRef(''), /empty/);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+  const a = image.addRef(`data:image/png;base64,${PNG.toString('base64')}`), b = image.addRef(jpeg);
+  assert.match(a, /^[0-9a-f]{24}\.png$/); assert.match(b, /^[0-9a-f]{24}\.jpg$/);
+  assert.deepEqual(readFileSync(image.file(b)), jpeg);
+  assert.deepEqual(image.extras(), { loras: listLoras(loraDir), editing: true });
+  const done = await image.generate({ prompt: 'swap <image1> <image2>', refs: [a, b], loras: [{ file: 'swap.safetensors', strength: 1 }], steps: 2 });
+  assert.deepEqual(sd.bodies[0].ref_images, [PNG.toString('base64'), jpeg.toString('base64')]);
+  assert.deepEqual(sd.bodies[0].lora, [{ path: 'swap.safetensors', multiplier: 1 }]);
+  assert.equal('refImages' in done.request, false, 'the pictures themselves are not sent back');
+  assert.deepEqual(done.request.refs, [a, b]);
+  await assert.rejects(image.generate({ prompt: 'x', refs: ['0123456789abcdef01234567.png'] }), /no longer there/);
+  await image.unload();
+});
+
+test('without the vision file a request with pictures is refused', async t => {
+  const env = setup(t, { pinnedPhase: 'released' });
+  const image = createImageModel({ config: env.config, pinned: env.pinned, dataDir: env.dir, spawnImpl: () => { throw new Error('not started'); } });
+  const name = image.addRef(PNG);
+  await assert.rejects(image.generate({ prompt: 'x', refs: [name] }), /vision file/);
+  assert.equal(image.extras().editing, false);
+});
+
+test('a LoRA lists its trigger words, and its strength, steps and guidance are saved into its note with the rest kept', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'strata-loras-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'ink.safetensors'), 'x');
+  writeFileSync(join(dir, 'ink.safetensors.strata.json'), JSON.stringify({ title: 'Ink', triggers: ['ink style', ' ', 3, 'sketchy lines '], source: 'https://example.com' }));
+  writeFileSync(join(dir, 'bare.safetensors'), 'x');
+  writeFileSync(join(dir, 'one.safetensors'), 'x');
+  writeFileSync(join(dir, 'one.safetensors.strata.json'), JSON.stringify({ triggers: 'one word' }));
+  const byFile = Object.fromEntries(listLoras(dir).map(l => [l.file, l]));
+  assert.deepEqual(byFile['ink.safetensors'].triggers, ['ink style', 'sketchy lines']);
+  assert.deepEqual(byFile['one.safetensors'].triggers, ['one word']);
+  assert.deepEqual(byFile['bare.safetensors'].triggers, []);
+
+  const saved = saveLoraDefaults(dir, { file: 'ink.safetensors', strength: 0.8, steps: 30, cfg: 2.5 });
+  assert.deepEqual([saved.strength, saved.steps, saved.cfg], [0.8, 30, 2.5]);
+  const note = JSON.parse(readFileSync(join(dir, 'ink.safetensors.strata.json'), 'utf8'));
+  assert.equal(note.title, 'Ink');
+  assert.equal(note.source, 'https://example.com');
+  assert.deepEqual(note.triggers, ['ink style', ' ', 3, 'sketchy lines '], 'what the app does not change stays as written');
+  assert.equal(saveLoraDefaults(dir, { file: 'ink.safetensors', steps: null }).steps, null, 'null removes a value');
+  assert.equal(saveLoraDefaults(dir, { file: 'bare.safetensors', steps: 20 }).steps, 20, 'a LoRA without a note gets one');
+  assert.throws(() => saveLoraDefaults(dir, { file: 'ink.safetensors', steps: 2.5 }), /whole number/);
+  assert.throws(() => saveLoraDefaults(dir, { file: 'ink.safetensors', cfg: 50 }), /from 1 to 20/);
+  assert.throws(() => saveLoraDefaults(dir, { file: '../ink.safetensors', steps: 20 }), /no LoRA/);
+  assert.throws(() => saveLoraDefaults(dir, { file: 'gone.safetensors', steps: 20 }), /no LoRA/);
+  writeFileSync(join(dir, 'one.safetensors.strata.json'), '{ broken');
+  assert.throws(() => saveLoraDefaults(dir, { file: 'one.safetensors', steps: 20 }), /not valid JSON/);
+  assert.equal(readFileSync(join(dir, 'one.safetensors.strata.json'), 'utf8'), '{ broken', 'a broken note is left for the person to fix');
+});
+
+test('the LoRAs that are on set the steps and guidance: this chat\'s values for one, else its own, the most steps and the lowest guidance', async () => {
+  const { code } = await transform(await readFile(new URL('../src/lib/image-run.ts', import.meta.url), 'utf8'), { loader: 'ts', format: 'esm' });
+  const { imageRun } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+  const lora = (file, steps, cfg) => ({ file, title: file, steps, cfg });
+  const loras = [lora('a', 25, 1), lora('b', 30, 2), lora('c', null, null)];
+  const settings = (on) => ({ steps: 40, cfg: 4, editSteps: 25, editCfg: 1, loras: on });
+  assert.deepEqual(imageRun(settings([]), loras, false), { steps: 40, cfg: 4, from: [] });
+  assert.deepEqual(imageRun(settings([]), loras, true), { steps: 25, cfg: 1, from: [] });
+  assert.deepEqual(imageRun(settings([{ file: 'c', strength: 1 }]), loras, false), { steps: 40, cfg: 4, from: [] }, 'a LoRA without settings keeps the chat\'s');
+  assert.deepEqual(imageRun(settings([{ file: 'a', strength: 1 }]), loras, false), { steps: 25, cfg: 1, from: ['a'] });
+  assert.deepEqual(imageRun(settings([{ file: 'a', strength: 1 }, { file: 'b', strength: 1 }]), loras, false), { steps: 30, cfg: 1, from: ['a', 'b'] });
+  assert.deepEqual(imageRun(settings([{ file: 'a', strength: 1, steps: 35 }]), loras, false), { steps: 35, cfg: 1, from: ['a'] }, 'this chat\'s value wins');
+  assert.deepEqual(imageRun(settings([{ file: 'a', strength: 1, steps: null, cfg: null }]), loras, true), { steps: 25, cfg: 1, from: [] }, 'null: none from it');
+  assert.deepEqual(imageRun(settings([{ file: 'gone', strength: 1 }]), loras, false), { steps: 40, cfg: 4, from: [] });
 });

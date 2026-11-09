@@ -53,7 +53,7 @@ import '../lib/rp';
 import { Btn, Icon, IconBtn, ErrorNotice, type IconName } from '../components/ui';
 import { composerCap, scrollBehavior } from '../lib/responsive';
 import { relTime, cx, duration, tokens, tps } from '../lib/format';
-import { ImageControls, ImageEmpty, ImageReply } from '../components/ImageChat';
+import { ImageControls, ImageEmpty, ImageReply, PictureStrip } from '../components/ImageChat';
 import { profileOf, wakeImage, wakePinned, addQuote, clearQuotes, removeQuote, createSubagentExample, parkMessage, takeParked, pushToast, setPreviewTabClosed, branchFrom, continueLast, markRead, retryLast, selectSession, rewindTo, sendMessage, stopStreaming, useStore, } from '../lib/store';
 import { CopyBtn, CopyMenuItem, MenuCloseContext } from '../components/CopyBtn';
 import { KEYS_UP, PILL_DISTANCE, distanceFromBottom, followAfterScroll, wheelLeavesBottom } from '../lib/follow-scroll';
@@ -672,8 +672,14 @@ function Composer({ draft, setDraft, loaded, streaming, onSubmit, onKey, session
     const canChat = image ? imageReady : loaded || native?.instances.some(i => i.status === 'ready');
     // Writing a message starts a released model (model-release.mjs), so it is loading while the message is written; in an Image chat
     // it is the image model that starts loading (the text model is stopped first).
-    const writing = draft.trim() !== '';
-    useEffect(() => { if (writing) { if (image) wakeImage(); else wakePinned(); } }, [writing, image]);
+    // Only typing in the open chat counts: a draft that comes along when another chat is opened does not.
+    const seen = useRef({ id: session?.id, draft });
+    useEffect(() => {
+        const before = seen.current;
+        seen.current = { id: session?.id, draft };
+        if (before.id !== session?.id || before.draft === draft || !draft.trim()) return;
+        if (image) wakeImage(); else wakePinned();
+    }, [draft, session?.id, image]);
     const whileBusy = useStore(s => s.whileBusy), parkedList = useStore(s => (session ? s.parked[session.id] : undefined)) ?? NO_PARKED;
     const quoteList = useStore(s => (session ? s.quotes[session.id] : undefined)) ?? NO_QUOTES;
     const commands = useSlashCommands(clearDraft, setDraft, session);
@@ -757,7 +763,7 @@ function Composer({ draft, setDraft, loaded, streaming, onSubmit, onKey, session
             }
         }}/>}
           <div className="st-composer__bar">
-            {image ? <ImageControls session={session} disabled={streaming}/> : <ComposerControls draft={draft} onDraft={setDraft} session={session} onPreview={onPreview} streaming={streaming} onSlash={() => { setSlashDismissed(false); setSlashOpen(true); requestAnimationFrame(() => textareaRef.current?.focus()); }} onError={setFileError} onAttach={(name, text) => { setDraft(`${draft}${draft ? '\n\n' : ''}Attached ${name}\n\n${text}`); requestAnimationFrame(() => textareaRef.current?.focus()); }}/>}
+            {image ? <ImageControls session={session} disabled={streaming} draft={draft} onDraft={setDraft}/> : <ComposerControls draft={draft} onDraft={setDraft} session={session} onPreview={onPreview} streaming={streaming} onSlash={() => { setSlashDismissed(false); setSlashOpen(true); requestAnimationFrame(() => textareaRef.current?.focus()); }} onError={setFileError} onAttach={(name, text) => { setDraft(`${draft}${draft ? '\n\n' : ''}Attached ${name}\n\n${text}`); requestAnimationFrame(() => textareaRef.current?.focus()); }}/>}
             {tr(streaming ? (<Btn variant="secondary" size="sm" icon="stop" onClick={stopStreaming}>{tr("Stop")}</Btn>) : (<Btn variant="primary" size="sm" icon="send" disabled={(!draft.trim() && !photos.length) || draft.trim() === '/' || (!canChat && timeSkipPrompt(draft) === null)} onClick={onSubmit}>{tr("Send")}</Btn>))}
           </div>
         </div>
@@ -806,7 +812,7 @@ function MessageView({ message: m, isLast, onEditPrompt, onPreview, onClosePrevi
         return <ImageReply message={m} isLast={isLast} onPreview={onPreview}/>;
     if (m.role === 'user') {
         return (<div className="st-msg st-msg--user" data-message-id={m.id} onMouseEnter={() => setSentTime(relTime(m.at))} onFocus={() => setSentTime(relTime(m.at))}>
-        <div className="st-bubble">{tr(m.photos?.length ? <ChatPhotos photos={m.photos}/> : null)}{sentQuote ? <><SentQuotes quotes={sentQuote.quotes}/><span className="st-bubble__text">{sentQuote.reply}</span></> : m.markdown ? <Markdown text={m.content} onOpenLink={onOpenLink} imageSession={activeSession}/> : <span className="st-bubble__text">{m.content}</span>}</div>
+        <div className="st-bubble">{tr(m.photos?.length ? <ChatPhotos photos={m.photos}/> : null)}{m.imageRefs?.length ? <PictureStrip refs={m.imageRefs}/> : null}{sentQuote ? <><SentQuotes quotes={sentQuote.quotes}/><span className="st-bubble__text">{sentQuote.reply}</span></> : m.markdown ? <Markdown text={m.content} onOpenLink={onOpenLink} imageSession={activeSession}/> : <span className="st-bubble__text">{m.content}</span>}</div>
         <div className="st-msg__meta">
           <time dateTime={m.at} title={tr(new Date(m.at).toLocaleString(localeTag()))}>{tr(sentTime)}</time>
           <span className="st-msg__actions">

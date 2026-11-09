@@ -177,6 +177,38 @@ about 32 s (0.8 s a step), and about 41 s for the first image after loading. Swa
 stop the text model and a few seconds to load the image model; going back, the text model takes about a
 minute to start.
 
+**Editing pictures.** Attach up to 4 pictures to a message (the Pictures button, drop or paste, or **Edit**
+under an image the chat made) and say what to change. The prompt names them `<image1>`, `<image2>`
+(the model's own labels). The page scales them first: picture 1 to about 1 MP, the others to about
+0.6 MP; with a full-size second picture the model ignored the prompt in a test here. An edit draws at
+picture 1's shape with the edit settings, 25 steps and guidance 1 (guidance 4 burnt the colours of an
+edit). It needs the text encoder's vision file, `STRATA_IMAGE_VISION`
+(`mmproj-Qwen3VL-8B-Instruct-F16.gguf` from `Qwen/Qwen3-VL-8B-Instruct-GGUF`, 1.2 GB).
+
+**LoRAs.** `STRATA_IMAGE_LORA_DIR` is a folder of LoRAs made for Qwen-Image-2.1 (LoRAs for the older
+Qwen-Image 2509/2512, Flux or Wan do not work on it). Each can have a `<file>.strata.json` note: title,
+description, kind (`style` or `edit`), strength, triggers (trigger words shown on its card; a click adds
+one to the prompt), prefix (words added to the front of the prompt), prompt (offered by **Use its prompt**),
+pictures (what each `<imageN>` should be), steps and cfg, and source. The Image chat's **LoRAs** list turns
+them on per chat. While a LoRA is on, its steps and guidance are used instead of the chat's (with several,
+the most steps and the lowest guidance); its card can change them for the chat, and **Save as its default**
+writes strength, steps and guidance back into the note. The folder's `AGENTS.md` tells an assistant how to
+set up a new LoRA and write its note.
+In `~/Apps/MODELS/loras/qwen-image-2.1`, each checked against Hugging Face's SHA-256:
+
+| LoRA | For | From |
+| --- | --- | --- |
+| Anime style (FUSAL), 0.7, 25 steps, guidance 1 | any image | MicksHF/Qwen-Image-2.1-Anime-Fusal |
+| Anime character consistency, 0.7 | edits | WarmBloodAban/Qwen-Image-2.1-LoRAs |
+| Anything to real person, 0.7 | edits | WarmBloodAban/Qwen-Image-2.1-LoRAs |
+| Edit consistency (nothing moves), 1.0 | edits | ausboss/Qwen-Image-2.1-Consistency-LoRA |
+| Outfit swap, 1.0 | edits: person, outfit | ausboss/Qwen-Image-2.1-Outfit-Swap-Consistency-LoRA |
+| Head swap, and Head swap keeping expression (BFS v1.1), 1.0 | edits: scene, head | Alissonerdx/BFS-Best-Face-Swap |
+| Whole person swap (BFS body), 1.0 | edits: scene, person | Alissonerdx/BFS-Best-Face-Swap |
+
+Measured here (RTX 5090, 1024x1024): the anime LoRA at 25 steps and guidance 1 about 22 s; an edit with
+one picture about 20 s; a two-picture edit about 21 s.
+
 `engine-image/sd-server` is built from the stable-diffusion.cpp commit `tools/image/qimage.py` pins:
 
     .venv/bin/python tools/image/install.py --backend cuda --arch 120 --build-only
@@ -314,3 +346,9 @@ report with it), and a helper without the skill tool is no longer shown the skil
   from them (pushing is only caught by its command words), and a backup of the save points outside
   the project.
 
+
+### Remote access
+
+The whole app over HTTPS on port 8443, on the home network and from outside through Cloudflare
+(`https://sprinkler.sparknv.win:8443`), behind one key in `~/.config/strata-remote/remote.json`. Turned on by
+`STRATA_REMOTE_CONFIG` in the launcher. Setup, the API for apps and what was tested: [REMOTE.md](REMOTE.md).

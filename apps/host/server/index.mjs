@@ -91,6 +91,7 @@ import { BOOK_DIR as VIBE_BOOK_DIR, loadBook as vibeLoadBook, loadRun as vibeLoa
 import { createPinnedModel, pinConfig } from './pinned-model.mjs';
 import { createActivityLog, createModelReleaser, releaseConfig, scanGames } from './model-release.mjs';
 import { createImageModel, imageModelConfig } from './image-model.mjs';
+import { createRemoteAccess, remoteConfig } from './remote-access.mjs';
 import { createRpStore } from './rp/store.mjs';
 import { createRpRoutes } from './rp/routes.mjs';
 import { createMemoryStore, memoryPrompt } from './memory.mjs';
@@ -2058,6 +2059,9 @@ async function api(req, res, path, method, url) {
   // Image chats (image-model.mjs): the model's state, load and unload, a request streamed as it draws, and the images made.
   if (path === '/api/image-model' && method === 'GET') return json(res, 200, imageModel.state());
   if (path === '/api/image-model/load' && method === 'POST') { void imageModel.load().catch(() => {}); return json(res, 200, imageModel.state()); }
+  if (path === '/api/image-model/extras' && method === 'GET') return json(res, 200, imageModel.extras());
+  if (path === '/api/image-model/lora' && method === 'POST') { try { return json(res, 200, imageModel.saveLora(await readBody(req))); } catch (e) { return error(res, 400, e.message); } }
+  if (path === '/api/images/ref' && method === 'POST') { try { return json(res, 200, { name: imageModel.addRef((await readBody(req, 28 * 1024 * 1024)).data) }); } catch (e) { return error(res, 400, e.message); } }
   if (path === '/api/image-model/touch' && method === 'POST') { imageModel.touch(); return json(res, 200, imageModel.state()); }
   if (path === '/api/image-model/unload' && method === 'POST') { await imageModel.unload('person'); return json(res, 200, imageModel.state()); }
   if (path === '/api/images/generate' && method === 'POST') {
@@ -2075,11 +2079,11 @@ async function api(req, res, path, method, url) {
     if (!res.writableEnded) res.end();
     return undefined;
   }
-  const imageFile = /^\/api\/images\/file\/([0-9a-f]{24}\.png)$/.exec(path);
+  const imageFile = /^\/api\/images\/file\/([0-9a-f]{24}\.(?:png|jpg|webp))$/.exec(path);
   if (imageFile && method === 'GET') {
     const file = imageModel.file(imageFile[1]);
     if (!file) return error(res, 404, 'No such image.');
-    res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'private, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' });
+    res.writeHead(200, { 'content-type': { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' }[file.split('.').pop()], 'cache-control': 'private, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' });
     createReadStream(file).pipe(res);
     return undefined;
   }
@@ -2513,8 +2517,16 @@ if (PIN) {
   });
   stopReleaseWatch = releaser.start();
 }
+/* Remote access (remote-access.mjs): the whole app over HTTPS on the network and from outside, behind one key; off without
+   STRATA_REMOTE_CONFIG. A bad config file is said once and the app runs without it. */
+let remote = null;
+try {
+  const config = remoteConfig();
+  if (config) remote = createRemoteAccess({ config, localPort: PORT, pinned: PIN ? { base: PIN.base, ensure: () => pinned.ensure() } : null, log: line => console.log(line) });
+} catch (e) { console.error(e.message); }
 server.listen(PORT, HOST, () => {
   if (process.send) process.send({ type: 'strata-ready', port: PORT });
+  remote?.start().catch(e => console.error(`remote access · not started: ${e.message}`));
   // Engines a lost owner left behind (an earlier crash, an older version): ended after a PID + start time + command-line check.
   if (control && process.env.STRATA_PACKAGED === '1') control.cleanup().catch(() => {});
 });
@@ -2525,7 +2537,7 @@ const shutdown = async () => {
   clearInterval(taskTimer);tasks.close();stopReleaseWatch();stopImageWatch();imageModel.kill();
   const timeout=setTimeout(()=>process.exit(0),control?45000:10000);timeout.unref();   // stopping an engine through Control: drained (15 s), then ended; the shell's deadline is longer
   server.close();server.closeAllConnections?.();
-  await Promise.allSettled([localShare.stop(),cloudflare.stop(),native.close(),agent.close()]);
+  await Promise.allSettled([localShare.stop(),cloudflare.stop(),native.close(),agent.close(),remote?.stop()]);
   process.exit(0);
 };
 // Every ordinary way of being told to stop takes the clean path: Ctrl+C, kill, the terminal closing (SIGHUP), Ctrl+Break.

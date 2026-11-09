@@ -168,9 +168,20 @@ export interface ImageModelState {
   defaults: { steps: number; cfg: number; width: number; height: number } | null;
 }
 /** An Image chat's settings for its next images. */
-export interface ImageSettings { width: number; height: number; steps: number; cfg: number; n: number; negative: string; seed: number | null }
+export interface ImageSettings {
+  width: number; height: number; steps: number; cfg: number; n: number; negative: string; seed: number | null;
+  /** Steps and guidance when pictures are attached (an edit): the LoRAs for Qwen-Image-2.1 edits are made at 25 and 1. */
+  editSteps: number; editCfg: number;
+  /** The LoRAs that are on, by file name, with their strength, and this chat's steps and guidance for one (absent: the
+   *  LoRA's own; null: none from it). */
+  loras: { file: string; strength: number; steps?: number | null; cfg?: number | null }[];
+}
+/** A picture attached to an Image chat message (stored by the host; `<imageN>` in the prompt is the Nth). */
+export interface ImageRef { name: string; url: string; width: number; height: number }
+/** A LoRA in the host's LoRA folder (server/image-model.mjs listLoras). */
+export interface ImageLora { file: string; title: string; description: string; kind: 'style' | 'edit'; strength: number; prefix: string | null; prompt: string | null; pictures: string[]; steps: number | null; cfg: number | null; source: string | null; triggers: string[] }
 /** An Image chat's reply while it is drawn and after: what was asked, the step, the live preview. */
-export interface ImageJob { phase: 'waiting' | 'freeing' | 'loading' | 'drawing' | 'done'; width?: number; height?: number; step: number; steps: number; index: number; n: number; preview: string | null; seconds?: number; request?: { width: number; height: number; steps: number; cfg: number; seed: number; negative: string } }
+export interface ImageJob { phase: 'waiting' | 'freeing' | 'loading' | 'drawing' | 'done'; width?: number; height?: number; step: number; steps: number; index: number; n: number; preview: string | null; seconds?: number; request?: { width: number; height: number; steps: number; cfg: number; seed: number; negative: string; loras?: { file: string; title: string; strength: number }[]; refs?: string[] } }
 export interface ModelConnectionDraft {
   id?: string; kind: 'provider' | 'custom'; provider: string | null; name: string;
   baseUrl: string; protocol: ModelProtocol; apiKey: string; clearKey?: boolean; models: ApiModel[];
@@ -376,6 +387,8 @@ export interface ChatMessage {
   photos?:import('./chat-photos').ChatPhoto[];
   /** An Image chat's reply: the drawing's progress and settings. */
   image?: ImageJob;
+  /** An Image chat message's attached pictures, in order (<image1>, <image2>, ...). */
+  imageRefs?: ImageRef[];
   /** Reply came from a saved API connection, rather than the local engine. */
   remoteModel?: boolean;
   timeSkipId?: string;
