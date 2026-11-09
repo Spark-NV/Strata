@@ -3,7 +3,7 @@
 // the pure part is serve/web/history.js, the browser store is serve/web/chatstore.js.
 //
 // Both are opt-in (Chat settings > Chats) and off by default: off, the page keeps the one chat it always had, with "New chat"
-// clearing it (and an Undo). Nothing here goes to the server.
+// clearing it (and an Undo). Chat contents stay in the browser; Wipe chat history also clears the optional server monitor.
 //
 // This file is loaded before app.js and uses its globals when its functions run: $, esc, icon, node, toast, store, settings,
 // messages, attachments, busy, pending, setBusy, renderChat, renderAttachments, autosize, generateReply, releasePending.
@@ -23,9 +23,12 @@ const node = (tag, cls, text) => {
 let listOn = false;                  // the saved-chats list is on
 let chats = [], chat = null, chatId = "";
 let sidebarQuery = "", sidebarOpen = true;
+let seenWipe = null;                // catches a page restored from browser history after another tab wiped chats
+let wiping = false;
 let undoState = null;                // one change, in memory until a new question, another chat or a reload
 let panel = null;                    // the open "Rewind to here" panel or answer editor: {kind, index, el}
 const chatStore = StrataChatStore.createChatStore({
+  canWrite: () => canWriteChat(),
   onProblem(kind) {
     toast("warn", tr("store.title", "Chat list not saved"), kind === "memory"
       ? tr("store.memory", "This browser will not keep the chat list. It stays in memory until you close the page.")
@@ -35,12 +38,15 @@ const chatStore = StrataChatStore.createChatStore({
 });
 
 // the open chat's messages are the page's `messages`; with the list on they are also the chat's, the same array
+function canWriteChat() { return !wiping && store.get("historyWipe", null) === seenWipe; }
 function setMessages(next) {
   messages = next;
   if (chat) chat.messages = next;
 }
 function saveChat() {
+  if (!canWriteChat()) return;
   if (!listOn) { store.set("chat", H.cleanMessages(messages)); return; }   // off: one chat, as before
+  if (!chats.includes(chat)) chats.push(chat);       // after a wipe, the new empty chat is not saved until its first message
   chat.time = Date.now();
   chatStore.put(H.cleanChat(chat));
   renderSidebar();
@@ -68,6 +74,7 @@ async function openChats(fromScreen) {
   setMessages(chat.messages);
 }
 async function setChatList(on, fromScreen) {
+  if (!canWriteChat()) return;
   listOn = on;
   $("sidebar").hidden = !on;
   $("new-btn").hidden = on;                              // the list has its own New chat
@@ -117,6 +124,7 @@ function renderSidebar() {
 }
 
 function showChat(c) {
+  if (!canWriteChat()) return;
   clearUndo();
   chat = c; chatId = c.id; messages = c.messages;
   store.set("chatId", chatId);
@@ -161,6 +169,60 @@ function deleteChat(c) {
     chats.splice(Math.min(i, chats.length), 0, c);  // the display is sorted by time, so only the index matters
     if (wasOpen) showChat(c); else { chatStore.put(H.cleanChat(c)); renderSidebar(); }
   }});
+}
+
+// Remove every browser chat, including the single-chat key left by an older visit or by turning the list off.
+// The optional request monitor also keeps prompt bodies in server memory, so clear it without unloading the model.
+async function wipeHistory() {
+  if (wiping) return false;
+  if (busy) { stillWriting(); return false; }
+  if (!confirm(tr("wipe.confirm", "Delete all chat history saved in this browser? This cannot be undone."))) return false;
+  wiping = true;
+  seenWipe = `${Date.now()}-${Math.random()}`;
+  const syncMarked = store.set("historyWipe", seenWipe); // stop other tabs from writing old chats before clearing the database
+  if (!listOn) await chatStore.start();
+  const dbCleared = await chatStore.clear();
+  clearUndo();
+  releasePending();
+  closePanel();
+  clearToolMedia();
+  $("toasts").replaceChildren();              // old Delete/New chat toasts must not offer an Undo after the wipe
+  $("input").value = "";
+  autosize();
+  attachments = [];
+  pending = null;
+  renderAttachments();
+  chats = [];
+  chat = listOn ? H.newChat() : null;
+  setMessages(chat ? chat.messages : []);
+  chatId = chat ? chat.id : "";
+  sidebarQuery = "";
+  $("sidebar-search").value = "";
+  const oldChatCleared = store.remove("chat");
+  const oldIdCleared = store.remove("chatId");
+  const localCleared = oldChatCleared && oldIdCleared && syncMarked;
+  renderChat();
+  let monitorCleared = true;
+  try {
+    const response = await fetch("api/requests/clear", {method: "POST", headers: headers(true), body: "{}"});
+    monitorCleared = response.ok;
+    if (response.status === 404) {
+      // A disabled monitor and an older server without this endpoint both answer 404.
+      // Check whether request history is available before calling the wipe complete.
+      const available = await fetch("api/requests", {headers: headers()});
+      monitorCleared = available.status === 404;
+    }
+  } catch (e) { monitorCleared = false; }
+  if (!dbCleared || !localCleared) {
+    toast("warn", tr("wipe.incomplete", "History could not be fully wiped"),
+          tr("wipe.browserFailed", "This browser refused a storage change. Close other Strata tabs and try again."), 7000);
+  } else if (!monitorCleared) {
+    toast("warn", tr("wipe.incomplete", "History could not be fully wiped"),
+          tr("wipe.monitorFailed", "Browser chats were removed, but server request history could not be cleared."), 7000);
+  } else toast("success", tr("wipe.done", "Chat history wiped"), tr("wipe.doneText", "Saved chats in this browser were removed."));
+  if (!syncMarked) seenWipe = store.get("historyWipe", null);
+  wiping = false;
+  return dbCleared && localCleared && monitorCleared;
 }
 // rename: the row turns into a field; Enter or a click outside keeps the name, Escape gives it up
 function renameChat(row, c) {
@@ -430,6 +492,13 @@ function branchHere(i) {
 
 // ------------------------------------------------------------------ wiring (called once by app.js)
 function initChats() {
+  seenWipe = store.get("historyWipe", null);
+  window.addEventListener("storage", (event) => {
+    if (event.key === "strata.historyWipe") location.reload();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted && store.get("historyWipe", null) !== seenWipe) location.reload();
+  });
   $("sidebar-toggle").onclick = () => setSidebar(!sidebarOpen, true);
   $("sidebar-new").onclick = startChat;
   $("sidebar-search").addEventListener("input", () => { sidebarQuery = $("sidebar-search").value; renderSidebar(); });

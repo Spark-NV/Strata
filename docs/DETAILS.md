@@ -818,7 +818,7 @@ switch below is **off by default**; with all of them off the page behaves as it 
 
 - **Render math.** Equations written as `\( ... \)`, `\[ ... \]`, `$x$` or `$$ ... $$` are drawn as formulas by KaTeX 0.19.0, which
   ships in `serve/web/vendor/katex` (MIT; `PROVENANCE.json` there lists the package and a hash of every file). The text of a
-  message is never changed: copying, the Markdown export and the next request all carry what the model wrote. Code, prices
+  message is never changed: copying and the next request both carry what the model wrote. Code, prices
   (`$5 and $10`) and a formula still being written stay text. A formula KaTeX cannot read stays as its source. A formula can only
   draw: it cannot make a link, load a picture or run anything (`\href`, `\url`, `\includegraphics` and `\htmlClass` are shown as
   their own names).
@@ -826,6 +826,10 @@ switch below is **off by default**; with all of them off the page behaves as it 
   days as headings. The chats live in this browser's IndexedDB; a picture or file is kept by name only. Nothing goes to the server.
   In a private window, or when the browser's storage is full, the list stays in memory and the page says so once. Turning it on
   keeps the chat on the screen as the first one in the list; turning it off keeps that chat as the single chat.
+- **Wipe chat history.** The trash button in the chat composer asks before removing every saved chat in this browser, including the
+  single chat used when the list is off. It clears the open chat, draft and Undo controls, and tells other open Strata tabs to
+  reload. If the API request monitor is on, its in-memory request history is also cleared. The page reports when either storage
+  or the server refuses the wipe. This does not remove files a person downloaded or logs outside the browser.
 - **Edit and rewind messages.** Under each message: **Regenerate** (a new answer to the same question), **Edit answer** (correct its
   text; the old thinking and tool calls go and no request is sent) and **Rewind to here**. Rewind asks what you want. On your
   message, **Edit and send again here** hides it and the messages after it and puts it in the box; on an answer, **Continue from
@@ -866,6 +870,8 @@ controls, active and queued requests, request bodies, output, separate reasoning
 first-token and decode timings. `GET /api/requests` returns summaries and `GET /api/requests?id=<id>` one request. The
 monitor keeps the newest 100 requests in memory until restart, 262,144 characters per field, with visible truncation flags.
 Headers are not recorded. Treat the history as sensitive when Strata is reachable from a network, and set an API key.
+The web page's Wipe chat history button clears these records through `POST /api/requests/clear` (same-origin JSON and the
+server's API key, if configured, are required). It does not unload the model or interrupt a request.
 
 ---
 

@@ -45,8 +45,8 @@ class OffIsThePageFromBefore(unittest.TestCase):
         self.assertIn('data-v="wait"', self.html)
         self.assertRegex(self.html, r'<aside class="chat-sidebar"[^>]*\bhidden>')              # no list until it is switched on
 
-    def test_the_browser_store_is_opened_only_for_the_list(self):
-        self.assertEqual(self.ui.count("chatStore.start()"), 1)
+    def test_the_browser_store_is_opened_for_the_list_and_wipe(self):
+        self.assertEqual(self.ui.count("chatStore.start()"), 2)
         self.assertRegex(self.ui, r"async function openChats\(fromScreen\) \{\s*await chatStore\.start\(\);")
         self.assertEqual(len(re.findall(r"\bopenChats\(", self.ui)), 2)       # its definition and the one call, in setChatList
         self.assertNotIn("indexedDB", self.app, "the page's main script never touches the store")
@@ -102,6 +102,47 @@ class NothingOnTheServer(unittest.TestCase):
                 with self.assertRaises(urllib.error.HTTPError) as e:
                     urllib.request.urlopen(self.base + path, timeout=10)
                 self.assertEqual(e.exception.code, 404)
+
+
+class WipeRequestMonitor(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        tok = ByteTokenizer()
+        cls.svc = Service(MockEngine(tok, "ok"), tok, ChatTemplate(ROOT / "serve" / "chat_template.jinja"))
+        cls.svc.api_monitor = True
+        cls.httpd = serve(cls.svc, port=0)
+        cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def test_wipe_clears_monitor_records(self):
+        self.svc.begin_request("/v1/chat/completions", {"messages": [{"role": "user", "content": "private"}]})
+        request = urllib.request.Request(self.base + "/api/requests/clear", data=b"{}",
+                                         headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            self.assertEqual(response.status, 200)
+        self.assertEqual(self.svc.request_records(), [])
+
+    def test_wipe_rejects_form_posts(self):
+        self.svc.begin_request("/v1/chat/completions", {"messages": [{"role": "user", "content": "private"}]})
+        request = urllib.request.Request(self.base + "/api/requests/clear", data=b"{}", method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=10)
+        self.assertEqual(error.exception.code, 415)
+        self.assertTrue(self.svc.request_records())
+
+    def test_wipe_rejects_another_web_site(self):
+        self.svc.begin_request("/v1/chat/completions", {"messages": [{"role": "user", "content": "private"}]})
+        request = urllib.request.Request(self.base + "/api/requests/clear", data=b"{}",
+                                         headers={"Content-Type": "application/json", "Origin": "https://example.com"},
+                                         method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=10)
+        self.assertEqual(error.exception.code, 403)
+        self.assertTrue(self.svc.request_records())
 
 
 @unittest.skipUnless(os.environ.get("WEBTEST_MODULES") and shutil.which("node"),

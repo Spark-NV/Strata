@@ -25,7 +25,10 @@
   "chat.stopped": "Parada",
   "chat.stoppedLower": "parada",
   "chat.tokens": "{n} tokens",
-  "chat.toolCalls": {"one": "{n} chamada de ferramenta", "other": "{n} chamadas de ferramenta"},
+  "chat.toolCalls": {
+    "one": "{n} chamada de ferramenta",
+    "other": "{n} chamadas de ferramenta"
+  },
   "chat.toolLimit": "parada no limite de {n} rodadas de ferramentas (mcp.max_rounds)",
   "chat.untitled": "Novo chat",
   "chat.you": "Você",
@@ -41,10 +44,9 @@
   "composer.message": "Mensagem",
   "composer.newline": "Shift+Enter: nova linha",
   "composer.placeholder": "Pergunte o que quiser…",
-  "composer.save": "Salvar este chat como Markdown",
-  "composer.saveLabel": "Salvar este chat",
   "composer.send": "Enviar",
   "composer.stop": "Parar",
+  "composer.wipe": "Apagar histórico de chats",
   "drawer.apply": "Aplicar",
   "drawer.busy": "Quando você envia enquanto ele responde",
   "drawer.busyInterject": "Interromper",
@@ -91,7 +93,6 @@
   "drawer.thinking": "Raciocínio",
   "drawer.title": "Configurações do chat",
   "drawer.untilDone": "Até terminar",
-  "export.nothing": "Ainda não há nada para salvar",
   "file.big": "Arquivo grande demais",
   "file.bigText": "{name} passa de 512 KB.",
   "file.binaryText": "{name} parece ser um arquivo binário.",
@@ -113,15 +114,24 @@
   "hist.editAnswerTitle": "Corrija o texto da resposta. Nenhuma solicitação é enviada.",
   "hist.editLabel": "Editar a resposta",
   "hist.editNote": "O raciocínio e as chamadas de ferramenta anteriores da resposta são removidos. Nenhuma solicitação é enviada.",
-  "hist.editRemoves": {"one": "Ao salvar, a {n} mensagem seguinte fica oculta. ", "other": "Ao salvar, as {n} mensagens seguintes ficam ocultas. "},
+  "hist.editRemoves": {
+    "one": "Ao salvar, a {n} mensagem seguinte fica oculta. ",
+    "other": "Ao salvar, as {n} mensagens seguintes ficam ocultas. "
+  },
   "hist.edited": "Editada",
-  "hist.editedHidden": {"one": "Resposta editada, {n} mensagem oculta", "other": "Resposta editada, {n} mensagens ocultas"},
+  "hist.editedHidden": {
+    "one": "Resposta editada, {n} mensagem oculta",
+    "other": "Resposta editada, {n} mensagens ocultas"
+  },
   "hist.editedOnly": "Resposta editada",
   "hist.empty": "A resposta está vazia",
   "hist.emptyText": "Escreva algo antes de salvar.",
   "hist.finishFirst": "Termine primeiro o que está aberto",
   "hist.finishFirstText": "Salve ou pressione Cancelar.",
-  "hist.hidden": {"one": "{n} mensagem oculta", "other": "{n} mensagens ocultas"},
+  "hist.hidden": {
+    "one": "{n} mensagem oculta",
+    "other": "{n} mensagens ocultas"
+  },
   "hist.lostText": "Este navegador guardou os nomes, não o conteúdo. Comece um novo chat e anexe-os de novo.",
   "hist.lostText2": "Este navegador guardou os nomes, não o conteúdo. Anexe-os de novo.",
   "hist.lostTitle": "É preciso anexar os arquivos de novo",
@@ -206,7 +216,10 @@
   "sidebar.delete": "Excluir este chat",
   "sidebar.deleteShort": "Excluir",
   "sidebar.expand": "Abrir a lista de chats",
-  "sidebar.foot": {"one": "{n} chat · guardado neste navegador", "other": "{n} chats · guardados neste navegador"},
+  "sidebar.foot": {
+    "one": "{n} chat · guardado neste navegador",
+    "other": "{n} chats · guardados neste navegador"
+  },
   "sidebar.nameFor": "Nome deste chat",
   "sidebar.noMatch": "Nenhum chat corresponde",
   "sidebar.none": "Ainda não há chats",
@@ -245,5 +258,11 @@
   "tool.running": "Em execução",
   "tool.skipped": "Não executada",
   "tool.writing": "Escrevendo",
-  "undo": "Desfazer"
+  "undo": "Desfazer",
+  "wipe.browserFailed": "Este navegador recusou uma alteração no armazenamento. Feche outros separadores do Strata e tente novamente.",
+  "wipe.confirm": "Apagar todos os chats guardados neste navegador? Esta ação não pode ser desfeita.",
+  "wipe.done": "Histórico de chats apagado",
+  "wipe.doneText": "Os chats guardados neste navegador foram removidos.",
+  "wipe.incomplete": "Não foi possível apagar todo o histórico",
+  "wipe.monitorFailed": "Os chats do navegador foram removidos, mas não foi possível apagar o histórico de pedidos do servidor."
 }

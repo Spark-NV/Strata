@@ -25,7 +25,9 @@
   "chat.stopped": "已停止",
   "chat.stoppedLower": "已停止",
   "chat.tokens": "{n} 个 token",
-  "chat.toolCalls": {"other": "{n} 次工具调用"},
+  "chat.toolCalls": {
+    "other": "{n} 次工具调用"
+  },
   "chat.toolLimit": "已在 {n} 轮工具调用的上限处停止 (mcp.max_rounds)",
   "chat.untitled": "新聊天",
   "chat.you": "你",
@@ -41,10 +43,9 @@
   "composer.message": "消息",
   "composer.newline": "Shift+Enter: 换行",
   "composer.placeholder": "想问什么都可以…",
-  "composer.save": "将此聊天保存为 Markdown",
-  "composer.saveLabel": "保存此聊天",
   "composer.send": "发送",
   "composer.stop": "停止",
+  "composer.wipe": "清除聊天记录",
   "drawer.apply": "应用",
   "drawer.busy": "回答过程中发送消息时",
   "drawer.busyInterject": "打断",
@@ -91,7 +92,6 @@
   "drawer.thinking": "思考",
   "drawer.title": "聊天设置",
   "drawer.untilDone": "直到完成",
-  "export.nothing": "还没有可保存的内容",
   "file.big": "文件太大",
   "file.bigText": "{name} 超过 512 KB。",
   "file.binaryText": "{name} 看起来是二进制文件。",
@@ -113,15 +113,21 @@
   "hist.editAnswerTitle": "修改回答的文字。不会发送请求。",
   "hist.editLabel": "编辑回答",
   "hist.editNote": "该回答之前的思考过程和工具调用会被移除。不会发送请求。",
-  "hist.editRemoves": {"other": "保存会隐藏其后的 {n} 条消息。"},
+  "hist.editRemoves": {
+    "other": "保存会隐藏其后的 {n} 条消息。"
+  },
   "hist.edited": "已编辑",
-  "hist.editedHidden": {"other": "回答已编辑，隐藏了 {n} 条消息"},
+  "hist.editedHidden": {
+    "other": "回答已编辑，隐藏了 {n} 条消息"
+  },
   "hist.editedOnly": "回答已编辑",
   "hist.empty": "回答是空的",
   "hist.emptyText": "保存前请先写点内容。",
   "hist.finishFirst": "请先完成打开着的内容",
   "hist.finishFirstText": "保存它，或点击取消。",
-  "hist.hidden": {"other": "已隐藏 {n} 条消息"},
+  "hist.hidden": {
+    "other": "已隐藏 {n} 条消息"
+  },
   "hist.lostText": "此浏览器只保留了名称，没有保留内容。请开始新聊天并重新附加。",
   "hist.lostText2": "此浏览器只保留了名称，没有保留内容。请重新附加。",
   "hist.lostTitle": "需要重新添加附件",
@@ -206,7 +212,9 @@
   "sidebar.delete": "删除此聊天",
   "sidebar.deleteShort": "删除",
   "sidebar.expand": "展开聊天列表",
-  "sidebar.foot": {"other": "{n} 个聊天 · 保存在此浏览器中"},
+  "sidebar.foot": {
+    "other": "{n} 个聊天 · 保存在此浏览器中"
+  },
   "sidebar.nameFor": "此聊天的名称",
   "sidebar.noMatch": "没有匹配的聊天",
   "sidebar.none": "还没有聊天",
@@ -245,5 +253,11 @@
   "tool.running": "运行中",
   "tool.skipped": "未运行",
   "tool.writing": "正在写入",
-  "undo": "撤销"
+  "undo": "撤销",
+  "wipe.browserFailed": "浏览器拒绝更改存储内容。请关闭其他 Strata 标签页后重试。",
+  "wipe.confirm": "删除此浏览器中保存的所有聊天吗？此操作无法撤销。",
+  "wipe.done": "聊天记录已清除",
+  "wipe.doneText": "此浏览器中保存的聊天已删除。",
+  "wipe.incomplete": "无法完全清除记录",
+  "wipe.monitorFailed": "浏览器中的聊天已删除，但无法清除服务器的请求记录。"
 }

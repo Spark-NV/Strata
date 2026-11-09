@@ -7,6 +7,8 @@
 "use strict";
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const fs = require("node:fs");
+const vm = require("node:vm");
 const H = require(path.join(__dirname, "web", "history.js"));
 const {createChatStore} = require(path.join(__dirname, "web", "chatstore.js"));
 
@@ -124,6 +126,15 @@ function makeIdb(hooks = {}, seed = {}) {
       queueMicrotask(() => { if (hooks.quota || hooks.abort) return; delete data[key]; req.result = true; req.onsuccess && req.onsuccess(); });
       return req;
     },
+    clear() {
+      const req = request();
+      queueMicrotask(() => {
+        if (hooks.quota || hooks.abort) return;
+        for (const key of Object.keys(data)) delete data[key];
+        req.result = true; req.onsuccess && req.onsuccess();
+      });
+      return req;
+    },
     getAll() {
       const req = request();
       queueMicrotask(() => { if (hooks.abort) return; req.result = Object.values(data); req.onsuccess && req.onsuccess(); });
@@ -159,6 +170,61 @@ const mk = (hooks, seed) => {
 const chat = (id, extra = {}) => ({id, title: id, time: 1, messages: [user("hi " + id)], ...extra});
 
 Object.assign(cases, {
+  async wipe_history_removes_saved_and_visible_chats_without_undo() {
+    const saved = new Map([["chat", [user("legacy secret")]], ["chatId", "old"]]);
+    const events = [], page = {
+      StrataHistory: H,
+      StrataChatStore: {createChatStore: () => ({start: async () => true, clear: async () => { events.push("idb cleared"); return true; }})},
+      store: {get: (key, fallback) => saved.has(key) ? saved.get(key) : fallback,
+              remove: (key) => { saved.delete(key); return true; },
+              set: (key, value) => { if (key === "historyWipe") events.push("wipe announced"); saved.set(key, value); return true; }},
+      tr: (_key, english) => english,
+      toast: () => {}, confirm: () => true, busy: null, pending: null, attachments: [],
+      settings: {chatEdit: false},
+      messages: [user("visible secret")],
+      clearUndo: () => events.push("undo cleared"), releasePending: () => {}, closePanel: () => {},
+      clearToolMedia: () => {}, renderAttachments: () => {}, autosize: () => {}, renderChat: () => {},
+      headers: () => ({"Content-Type": "application/json"}),
+      fetch: async () => { events.push("monitor cleared"); return {ok: true, status: 200}; },
+      $: (id) => id === "history-undo" ? null : ({value: "draft secret", replaceChildren: () => events.push("toasts cleared")}),
+    };
+    vm.createContext(page);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, "web", "chats-ui.js"), "utf8"), page);
+    vm.runInContext('listOn = true; chats = [{id:"old", title:"secret", messages:messages}]; chat = chats[0]; chatId = "old";', page);
+    assert.equal(await vm.runInContext("wipeHistory()", page), true);
+    assert.equal(page.messages.length, 0);
+    assert.equal(saved.has("chat"), false);
+    assert.equal(saved.has("chatId"), false);
+    assert.ok(events.includes("idb cleared") && events.includes("monitor cleared"));
+    assert.ok(events.indexOf("wipe announced") < events.indexOf("idb cleared"),
+              "other tabs must be told before the IndexedDB clear starts");
+    assert.ok(events.includes("toasts cleared"));
+    assert.equal(vm.runInContext("undoState", page), null);
+    assert.equal(vm.runInContext("chats.length", page), 0);
+    vm.runInContext('messages.push({role:"user", text:"first after wipe"});', page);
+    assert.equal(vm.runInContext("chat.messages[0]?.text", page), "first after wipe",
+                 "the first new chat after a wipe must remain bound to its saved record");
+    saved.set("chat", [user("single chat secret")]);
+    page.messages = [user("single chat secret")];
+    vm.runInContext("listOn = false; chat = null;", page);
+    assert.equal(await vm.runInContext("wipeHistory()", page), true);
+    assert.equal(saved.has("chat"), false, "the single-chat mode is erased too");
+    assert.equal(page.messages.length, 0);
+    page.fetch = async (url) => ({ok: false, status: url === "api/requests/clear" ? 404 : 200});
+    assert.equal(await vm.runInContext("wipeHistory()", page), false,
+                 "an older server with a live monitor must not report a complete wipe");
+    page.fetch = async () => ({ok: false, status: 404});
+    assert.equal(await vm.runInContext("wipeHistory()", page), true,
+                 "a disabled monitor has no request history to clear");
+    page.messages = [user("keep me")];
+    page.confirm = () => false;
+    assert.equal(await vm.runInContext("wipeHistory()", page), false);
+    assert.equal(page.messages.length, 1, "cancel leaves history alone");
+    vm.runInContext('listOn = true; chat = {id:"stale", messages:messages}; seenWipe = "old";', page);
+    saved.set("historyWipe", "new");
+    await vm.runInContext("setChatList(false, true)", page);
+    assert.equal(saved.has("chat"), false, "a stale tab cannot copy a chat back into the single-chat key");
+  },
   async store_fresh_database_creates_the_store_and_reads() {
     const a = mk({}, {c0: chat("c0"), c1: chat("c1")});
     assert.equal(await a.store.start(), true);
@@ -174,12 +240,36 @@ Object.assign(cases, {
     a.store.remove("c0"); await wait();
     assert.ok(!("c0" in a.idb.records));
   },
+  async store_wipe_removes_every_saved_chat() {
+    const a = mk({}, {c0: chat("c0"), c1: chat("c1")});
+    await a.store.start();
+    assert.equal(await a.store.clear(), true);
+    assert.deepEqual(await a.store.all(), []);
+    assert.deepEqual(Object.keys(a.idb.records), []);
+  },
+  async store_does_not_restore_a_chat_after_another_tab_wipes_it() {
+    let writable = true;
+    const idb = makeIdb({}, {c0: chat("c0")});
+    const store = createChatStore({indexedDB: idb, canWrite: () => writable});
+    await store.start();
+    writable = false;
+    store.put(chat("old"));
+    await wait();
+    assert.ok(!idb.records.old, "a stale tab cannot recreate history after the wipe marker changes");
+  },
+  async store_wipe_reports_a_refused_write() {
+    const a = mk({abort: "DataError"}, {c0: chat("c0")});
+    await a.store.start();
+    assert.equal(await a.store.clear(), false);
+    assert.ok(a.idb.records.c0);
+  },
   async store_private_mode_is_memory_only_and_says_so_once() {
     const a = mk({throws: true});
     assert.equal(await a.store.start(), false);
     assert.deepEqual(a.problems, ["memory"]);
     assert.deepEqual(await a.store.all(), []);
     a.store.put(chat("x")); a.store.remove("x");          // no store: nothing to do, nothing thrown
+    assert.equal(await a.store.clear(), false, "cannot claim persistent history was cleared without a store");
     await a.store.start();
     assert.deepEqual(a.problems, ["memory"], "told once, not on every try");
   },

@@ -25,7 +25,9 @@
   "chat.stopped": "중지됨",
   "chat.stoppedLower": "중지됨",
   "chat.tokens": "토큰 {n}개",
-  "chat.toolCalls": {"other": "도구 호출 {n}회"},
+  "chat.toolCalls": {
+    "other": "도구 호출 {n}회"
+  },
   "chat.toolLimit": "도구 라운드 한도 {n}회에서 중지됨 (mcp.max_rounds)",
   "chat.untitled": "새 채팅",
   "chat.you": "나",
@@ -41,10 +43,9 @@
   "composer.message": "메시지",
   "composer.newline": "Shift+Enter: 줄바꿈",
   "composer.placeholder": "무엇이든 물어보세요…",
-  "composer.save": "이 채팅을 Markdown으로 저장",
-  "composer.saveLabel": "이 채팅 저장",
   "composer.send": "보내기",
   "composer.stop": "중지",
+  "composer.wipe": "채팅 기록 지우기",
   "drawer.apply": "적용",
   "drawer.busy": "답변 중에 보내면",
   "drawer.busyInterject": "중단",
@@ -91,7 +92,6 @@
   "drawer.thinking": "추론",
   "drawer.title": "채팅 설정",
   "drawer.untilDone": "끝까지",
-  "export.nothing": "아직 저장할 내용이 없습니다",
   "file.big": "파일이 너무 큽니다",
   "file.bigText": "{name}은(는) 512 KB를 넘습니다.",
   "file.binaryText": "{name}은(는) 바이너리 파일 같습니다.",
@@ -113,15 +113,21 @@
   "hist.editAnswerTitle": "답변의 텍스트를 고칩니다. 요청은 전송되지 않습니다.",
   "hist.editLabel": "답변 편집",
   "hist.editNote": "답변의 이전 추론과 도구 호출이 제거됩니다. 요청은 전송되지 않습니다.",
-  "hist.editRemoves": {"other": "저장하면 이후 메시지 {n}개가 숨겨집니다. "},
+  "hist.editRemoves": {
+    "other": "저장하면 이후 메시지 {n}개가 숨겨집니다. "
+  },
   "hist.edited": "편집됨",
-  "hist.editedHidden": {"other": "답변을 편집했습니다. 메시지 {n}개 숨김"},
+  "hist.editedHidden": {
+    "other": "답변을 편집했습니다. 메시지 {n}개 숨김"
+  },
   "hist.editedOnly": "답변을 편집했습니다",
   "hist.empty": "답변이 비어 있습니다",
   "hist.emptyText": "저장하기 전에 내용을 입력하세요.",
   "hist.finishFirst": "먼저 열려 있는 것을 마무리하세요",
   "hist.finishFirstText": "저장하거나 취소를 누르세요.",
-  "hist.hidden": {"other": "메시지 {n}개 숨김"},
+  "hist.hidden": {
+    "other": "메시지 {n}개 숨김"
+  },
   "hist.lostText": "이 브라우저에는 이름만 남아 있고 내용은 없습니다. 새 채팅을 시작해 다시 첨부하세요.",
   "hist.lostText2": "이 브라우저에는 이름만 남아 있고 내용은 없습니다. 다시 첨부하세요.",
   "hist.lostTitle": "첨부 파일을 다시 추가해야 합니다",
@@ -206,7 +212,9 @@
   "sidebar.delete": "이 채팅 삭제",
   "sidebar.deleteShort": "삭제",
   "sidebar.expand": "채팅 목록 열기",
-  "sidebar.foot": {"other": "채팅 {n}개 · 이 브라우저에 저장됨"},
+  "sidebar.foot": {
+    "other": "채팅 {n}개 · 이 브라우저에 저장됨"
+  },
   "sidebar.nameFor": "이 채팅의 이름",
   "sidebar.noMatch": "일치하는 채팅이 없습니다",
   "sidebar.none": "아직 채팅이 없습니다",
@@ -245,5 +253,11 @@
   "tool.running": "실행 중",
   "tool.skipped": "실행 안 됨",
   "tool.writing": "작성 중",
-  "undo": "실행 취소"
+  "undo": "실행 취소",
+  "wipe.browserFailed": "브라우저가 저장소 변경을 거부했습니다. 다른 Strata 탭을 닫고 다시 시도하세요.",
+  "wipe.confirm": "이 브라우저에 저장된 모든 채팅을 삭제할까요? 되돌릴 수 없습니다.",
+  "wipe.done": "채팅 기록을 지웠습니다",
+  "wipe.doneText": "이 브라우저에 저장된 채팅을 삭제했습니다.",
+  "wipe.incomplete": "기록을 완전히 지우지 못했습니다",
+  "wipe.monitorFailed": "브라우저 채팅은 삭제했지만 서버 요청 기록은 지우지 못했습니다."
 }

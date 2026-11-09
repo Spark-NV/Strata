@@ -25,7 +25,9 @@
   "chat.stopped": "停止しました",
   "chat.stoppedLower": "停止",
   "chat.tokens": "{n} トークン",
-  "chat.toolCalls": {"other": "ツール呼び出し {n} 回"},
+  "chat.toolCalls": {
+    "other": "ツール呼び出し {n} 回"
+  },
   "chat.toolLimit": "ツールのラウンド上限 {n} 回で停止 (mcp.max_rounds)",
   "chat.untitled": "新しいチャット",
   "chat.you": "あなた",
@@ -41,10 +43,9 @@
   "composer.message": "メッセージ",
   "composer.newline": "Shift+Enter: 改行",
   "composer.placeholder": "なんでも聞いてください…",
-  "composer.save": "このチャットを Markdown で保存",
-  "composer.saveLabel": "このチャットを保存",
   "composer.send": "送信",
   "composer.stop": "停止",
+  "composer.wipe": "チャット履歴を消去",
   "drawer.apply": "適用",
   "drawer.busy": "回答中に送信したとき",
   "drawer.busyInterject": "割り込む",
@@ -91,7 +92,6 @@
   "drawer.thinking": "思考",
   "drawer.title": "チャット設定",
   "drawer.untilDone": "最後まで",
-  "export.nothing": "保存するものがまだありません",
   "file.big": "ファイルが大きすぎます",
   "file.bigText": "{name} は 512 KB を超えています。",
   "file.binaryText": "{name} はバイナリファイルのようです。",
@@ -113,15 +113,21 @@
   "hist.editAnswerTitle": "回答の文章を直します。リクエストは送られません。",
   "hist.editLabel": "回答を編集",
   "hist.editNote": "回答のこれまでの思考とツール呼び出しは削除されます。リクエストは送られません。",
-  "hist.editRemoves": {"other": "保存すると、これ以降の {n} 件のメッセージが非表示になります。"},
+  "hist.editRemoves": {
+    "other": "保存すると、これ以降の {n} 件のメッセージが非表示になります。"
+  },
   "hist.edited": "編集済み",
-  "hist.editedHidden": {"other": "回答を編集しました。{n} 件のメッセージを非表示"},
+  "hist.editedHidden": {
+    "other": "回答を編集しました。{n} 件のメッセージを非表示"
+  },
   "hist.editedOnly": "回答を編集しました",
   "hist.empty": "回答が空です",
   "hist.emptyText": "保存する前に何か入力してください。",
   "hist.finishFirst": "先に開いているものを終えてください",
   "hist.finishFirstText": "保存するか、キャンセルを押してください。",
-  "hist.hidden": {"other": "{n} 件のメッセージを非表示"},
+  "hist.hidden": {
+    "other": "{n} 件のメッセージを非表示"
+  },
   "hist.lostText": "このブラウザーには名前だけが残り、内容は残っていません。新しいチャットを始めて、もう一度添付してください。",
   "hist.lostText2": "このブラウザーには名前だけが残り、内容は残っていません。もう一度添付してください。",
   "hist.lostTitle": "添付をもう一度追加してください",
@@ -206,7 +212,9 @@
   "sidebar.delete": "このチャットを削除",
   "sidebar.deleteShort": "削除",
   "sidebar.expand": "チャット一覧を開く",
-  "sidebar.foot": {"other": "{n} 件のチャット · このブラウザーに保存"},
+  "sidebar.foot": {
+    "other": "{n} 件のチャット · このブラウザーに保存"
+  },
   "sidebar.nameFor": "このチャットの名前",
   "sidebar.noMatch": "一致するチャットはありません",
   "sidebar.none": "チャットはまだありません",
@@ -245,5 +253,11 @@
   "tool.running": "実行中",
   "tool.skipped": "未実行",
   "tool.writing": "書き込み中",
-  "undo": "元に戻す"
+  "undo": "元に戻す",
+  "wipe.browserFailed": "ブラウザーが保存データの変更を拒否しました。他の Strata タブを閉じて再試行してください。",
+  "wipe.confirm": "このブラウザーに保存されたすべてのチャットを削除しますか？元に戻せません。",
+  "wipe.done": "チャット履歴を消去しました",
+  "wipe.doneText": "このブラウザーに保存されたチャットを削除しました。",
+  "wipe.incomplete": "履歴を完全に消去できませんでした",
+  "wipe.monitorFailed": "ブラウザーのチャットは削除しましたが、サーバーのリクエスト履歴は消去できませんでした。"
 }

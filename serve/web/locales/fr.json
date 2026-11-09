@@ -44,10 +44,9 @@
   "composer.message": "Message",
   "composer.newline": "Maj+Entrée : nouvelle ligne",
   "composer.placeholder": "Posez une question…",
-  "composer.save": "Enregistrer cette conversation en Markdown",
-  "composer.saveLabel": "Enregistrer cette conversation",
   "composer.send": "Envoyer",
   "composer.stop": "Arrêter",
+  "composer.wipe": "Effacer l’historique des chats",
   "drawer.apply": "Appliquer",
   "drawer.busy": "Quand vous envoyez pendant qu’il répond",
   "drawer.busyInterject": "Interrompre",
@@ -94,7 +93,6 @@
   "drawer.thinking": "Réflexion",
   "drawer.title": "Réglages de la conversation",
   "drawer.untilDone": "Jusqu’à la fin",
-  "export.nothing": "Rien à enregistrer pour l’instant",
   "file.big": "Fichier trop volumineux",
   "file.bigText": "{name} dépasse 512 Ko.",
   "file.binaryText": "{name} ressemble à un fichier binaire.",
@@ -260,5 +258,11 @@
   "tool.running": "En cours",
   "tool.skipped": "Non exécuté",
   "tool.writing": "Écriture",
-  "undo": "Annuler"
+  "undo": "Annuler",
+  "wipe.browserFailed": "Ce navigateur a refusé une modification du stockage. Fermez les autres onglets Strata et réessayez.",
+  "wipe.confirm": "Supprimer tous les chats enregistrés dans ce navigateur ? Cette action est irréversible.",
+  "wipe.done": "Historique des chats effacé",
+  "wipe.doneText": "Les chats enregistrés dans ce navigateur ont été supprimés.",
+  "wipe.incomplete": "L’historique n’a pas pu être entièrement effacé",
+  "wipe.monitorFailed": "Les chats du navigateur ont été supprimés, mais l’historique des requêtes du serveur n’a pas pu être effacé."
 }

@@ -44,10 +44,9 @@
   "composer.message": "Message",
   "composer.newline": "Shift+Enter: new line",
   "composer.placeholder": "Ask anything…",
-  "composer.save": "Save this chat as Markdown",
-  "composer.saveLabel": "Save this chat",
   "composer.send": "Send",
   "composer.stop": "Stop",
+  "composer.wipe": "Wipe chat history",
   "drawer.apply": "Apply",
   "drawer.busy": "When you send while it is answering",
   "drawer.busyInterject": "Interrupt",
@@ -94,7 +93,6 @@
   "drawer.thinking": "Thinking",
   "drawer.title": "Chat settings",
   "drawer.untilDone": "Until done",
-  "export.nothing": "Nothing to save yet",
   "file.big": "File too large",
   "file.bigText": "{name} is over 512 KB.",
   "file.binaryText": "{name} looks like a binary file.",
@@ -260,5 +258,11 @@
   "tool.running": "Running",
   "tool.skipped": "Not run",
   "tool.writing": "Writing",
-  "undo": "Undo"
+  "undo": "Undo",
+  "wipe.browserFailed": "This browser refused a storage change. Close other Strata tabs and try again.",
+  "wipe.confirm": "Delete all chat history saved in this browser? This cannot be undone.",
+  "wipe.done": "Chat history wiped",
+  "wipe.doneText": "Saved chats in this browser were removed.",
+  "wipe.incomplete": "History could not be fully wiped",
+  "wipe.monitorFailed": "Browser chats were removed, but server request history could not be cleared."
 }

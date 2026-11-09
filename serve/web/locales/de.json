@@ -25,7 +25,10 @@
   "chat.stopped": "Gestoppt",
   "chat.stoppedLower": "gestoppt",
   "chat.tokens": "{n} Tokens",
-  "chat.toolCalls": {"one": "{n} Werkzeugaufruf", "other": "{n} Werkzeugaufrufe"},
+  "chat.toolCalls": {
+    "one": "{n} Werkzeugaufruf",
+    "other": "{n} Werkzeugaufrufe"
+  },
   "chat.toolLimit": "bei der Grenze von {n} Werkzeugrunden gestoppt (mcp.max_rounds)",
   "chat.untitled": "Neuer Chat",
   "chat.you": "Sie",
@@ -41,10 +44,9 @@
   "composer.message": "Nachricht",
   "composer.newline": "Umschalt+Eingabe: neue Zeile",
   "composer.placeholder": "Fragen Sie, was Sie möchten…",
-  "composer.save": "Diesen Chat als Markdown speichern",
-  "composer.saveLabel": "Diesen Chat speichern",
   "composer.send": "Senden",
   "composer.stop": "Stoppen",
+  "composer.wipe": "Chatverlauf löschen",
   "drawer.apply": "Anwenden",
   "drawer.busy": "Wenn Sie senden, während es antwortet",
   "drawer.busyInterject": "Unterbrechen",
@@ -91,7 +93,6 @@
   "drawer.thinking": "Denken",
   "drawer.title": "Chat-Einstellungen",
   "drawer.untilDone": "Bis fertig",
-  "export.nothing": "Noch nichts zu speichern",
   "file.big": "Datei zu groß",
   "file.bigText": "{name} ist größer als 512 KB.",
   "file.binaryText": "{name} sieht nach einer Binärdatei aus.",
@@ -113,15 +114,24 @@
   "hist.editAnswerTitle": "Den Text der Antwort korrigieren. Es wird keine Anfrage gesendet.",
   "hist.editLabel": "Antwort bearbeiten",
   "hist.editNote": "Das bisherige Denken und die Werkzeugaufrufe der Antwort werden entfernt. Es wird keine Anfrage gesendet.",
-  "hist.editRemoves": {"one": "Speichern blendet die {n} Nachricht danach aus. ", "other": "Speichern blendet die {n} Nachrichten danach aus. "},
+  "hist.editRemoves": {
+    "one": "Speichern blendet die {n} Nachricht danach aus. ",
+    "other": "Speichern blendet die {n} Nachrichten danach aus. "
+  },
   "hist.edited": "Bearbeitet",
-  "hist.editedHidden": {"one": "Antwort bearbeitet, {n} Nachricht ausgeblendet", "other": "Antwort bearbeitet, {n} Nachrichten ausgeblendet"},
+  "hist.editedHidden": {
+    "one": "Antwort bearbeitet, {n} Nachricht ausgeblendet",
+    "other": "Antwort bearbeitet, {n} Nachrichten ausgeblendet"
+  },
   "hist.editedOnly": "Antwort bearbeitet",
   "hist.empty": "Die Antwort ist leer",
   "hist.emptyText": "Schreiben Sie etwas, bevor Sie speichern.",
   "hist.finishFirst": "Schließen Sie zuerst ab, was offen ist",
   "hist.finishFirstText": "Speichern Sie es oder drücken Sie Abbrechen.",
-  "hist.hidden": {"one": "{n} Nachricht ausgeblendet", "other": "{n} Nachrichten ausgeblendet"},
+  "hist.hidden": {
+    "one": "{n} Nachricht ausgeblendet",
+    "other": "{n} Nachrichten ausgeblendet"
+  },
   "hist.lostText": "Dieser Browser hat nur die Namen behalten, nicht den Inhalt. Starten Sie einen neuen Chat und hängen Sie sie erneut an.",
   "hist.lostText2": "Dieser Browser hat nur die Namen behalten, nicht den Inhalt. Hängen Sie sie erneut an.",
   "hist.lostTitle": "Anhänge müssen erneut hinzugefügt werden",
@@ -206,7 +216,10 @@
   "sidebar.delete": "Diesen Chat löschen",
   "sidebar.deleteShort": "Löschen",
   "sidebar.expand": "Die Chatliste öffnen",
-  "sidebar.foot": {"one": "{n} Chat · in diesem Browser gespeichert", "other": "{n} Chats · in diesem Browser gespeichert"},
+  "sidebar.foot": {
+    "one": "{n} Chat · in diesem Browser gespeichert",
+    "other": "{n} Chats · in diesem Browser gespeichert"
+  },
   "sidebar.nameFor": "Name für diesen Chat",
   "sidebar.noMatch": "Kein Chat passt",
   "sidebar.none": "Noch keine Chats",
@@ -245,5 +258,11 @@
   "tool.running": "Läuft",
   "tool.skipped": "Nicht ausgeführt",
   "tool.writing": "Schreibt",
-  "undo": "Rückgängig"
+  "undo": "Rückgängig",
+  "wipe.browserFailed": "Dieser Browser hat eine Speicheränderung verweigert. Schließe andere Strata-Tabs und versuche es erneut.",
+  "wipe.confirm": "Alle in diesem Browser gespeicherten Chats löschen? Dies kann nicht rückgängig gemacht werden.",
+  "wipe.done": "Der Chatverlauf wurde gelöscht",
+  "wipe.doneText": "Gespeicherte Chats in diesem Browser wurden entfernt.",
+  "wipe.incomplete": "Der Verlauf konnte nicht vollständig gelöscht werden",
+  "wipe.monitorFailed": "Die Browser-Chats wurden entfernt, aber der Anfrageverlauf des Servers konnte nicht gelöscht werden."
 }

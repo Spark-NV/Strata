@@ -7892,6 +7892,13 @@ def make_handler(svc: Service):
             if path == "/config":
                 self._config_post()
                 return
+            if path == "/api/requests/clear" and svc.api_monitor:
+                if not self._control_body() or not self._own_page("request history can be cleared"):
+                    return
+                with svc.status_lock:
+                    svc.api_requests.clear()
+                self._json(200, {"status": "cleared"})
+                return
             if path in ("/unload", "/load") and not self._control_body():
                 return
             # JSON from Strata's own page only, as /settings: else a plain form POST from any site unloads the model

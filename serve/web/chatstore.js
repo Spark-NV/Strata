@@ -7,7 +7,7 @@
 // onProblem(kind) tells the page once: "memory" (no store), "quota" (full), "failed" (a write the browser refused).
 "use strict";
 (function (root) {
-  function createChatStore({indexedDB: idb = root.indexedDB, onProblem = () => {}} = {}) {
+  function createChatStore({indexedDB: idb = root.indexedDB, onProblem = () => {}, canWrite = () => true} = {}) {
     let db = null, told = false;
     const problem = (kind) => { if (!told) { told = true; onProblem(kind); } };
 
@@ -47,7 +47,7 @@
       t.onerror = warn; t.onabort = warn;
     }
     function put(chat) {                                  // one record per chat: not the whole list for one message
-      if (!db) return;
+      if (!db || !canWrite()) return;
       const t = db.transaction("chats", "readwrite");
       t.objectStore("chats").put(chat);
       watch(t);
@@ -58,7 +58,22 @@
       t.objectStore("chats").delete(id);
       watch(t);
     }
-    return {start, all, put, remove, get usable() { return !!db; }};
+    // A wipe is a single transaction; tell the caller if the browser refused it.
+    function clear() {
+      return new Promise((resolve) => {
+        if (!db) { resolve(false); return; }
+        let done = false;
+        const finish = (ok) => { if (!done) { done = true; resolve(ok); } };
+        try {
+          const t = db.transaction("chats", "readwrite");
+          t.oncomplete = () => finish(true);
+          t.onerror = () => { problem("failed"); finish(false); };
+          t.onabort = () => { problem("failed"); finish(false); };
+          t.objectStore("chats").clear();
+        } catch (e) { problem("failed"); finish(false); }
+      });
+    }
+    return {start, all, put, remove, clear, get usable() { return !!db; }};
   }
   const api = {createChatStore};
   root.StrataChatStore = api;
