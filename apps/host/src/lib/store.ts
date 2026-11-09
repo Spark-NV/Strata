@@ -2168,6 +2168,8 @@ export async function sendMessage(text: string, options: { fromLoop?: boolean; g
         nativeModelId:nativeState()?.instances.length?nativeState()?.defaultId:undefined,
         ...(pictures.length ? { imageIds: await uploadChatPhotos(pictures, sessionId) } : {}),
         useTools:state.sessions.find(s=>s.id===sessionId)?.preferences?.useTools===true,
+        // Offline (Chat): the host runs the turn with no tool that reaches the web, and refuses a model on the internet.
+        ...(state.sessions.find(s=>s.id===sessionId)?.preferences?.offline===true?{offline:true}:{}),
         // A chat set to plain talk (preferences.agent === false) never runs a tool: the host answers it directly.
         ...(state.sessions.find(s=>s.id===sessionId)?.preferences?.agent===false?{agent:false}:{}),
         thinking:state.sessions.find(s=>s.id===sessionId)?.preferences?.thinking??'Medium',

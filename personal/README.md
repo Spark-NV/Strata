@@ -347,6 +347,16 @@ report with it), and a helper without the skill tool is no longer shown the skil
   the project.
 
 
+### Offline chats
+
+Chat and Roleplay chats have an **Offline** switch (the shield in the message box). While it is on, the assistant has no
+internet: it is not offered web search, web pages or connected tools, the gate refuses them if it names one anyway (helpers
+too), `/research` is refused, and a model on the internet is not used. Memory, todo lists and questions still work. The pinned
+Qwen model runs on this PC, so it works offline. The switch is saved on the chat (`preferences.offline`) and sent with each
+message; the host enforces it (`chat-offline` profile, `server/profiles.mjs`). Measured on 2026-11-08 through the outside
+address: asked to search the web, an offline chat ran no tool and said it was offline; the same question online ran
+`web_search`.
+
 ### Remote access
 
 The whole app over HTTPS on port 8443, on the home network and from outside through Cloudflare

@@ -64,7 +64,7 @@ import { createModelProviders } from './model-providers.mjs';
 import { createForkTimeskip } from './timeskip-fork.mjs';
 import { prepareOversized } from './oversize.mjs';
 import { createChatFolders, chatRootOf, openFile, resolveChatFile, previewFile, rawFile, createAttachments, withAttachments } from './chat-files.mjs';
-import { createLlmProxy, samplingFromExpert } from './agent/llm-shape.mjs';
+import { createLlmProxy, isPrivateHost, samplingFromExpert } from './agent/llm-shape.mjs';
 import { checkUpdates, checkComponentUpdates, engineFirstRun } from './updates.mjs';
 import { plainNoModel } from './no-model-text.mjs';
 import { createAppUi } from './app-ui.mjs';
@@ -86,7 +86,7 @@ import { apiPath } from './api-paths.mjs';
 import { findFreePort, listenProblem } from './ports.mjs';
 import { validateChatImages } from './chat-images.mjs';
 import { createTimeSkip, measureFolder, timeskipRevisionMessage, imageTypeOf } from './timeskip.mjs';
-import { createProfileStore, profileSampling, PROFILE_IDS } from './profiles.mjs';
+import { createProfileStore, offlineModelRefusal, profileSampling, PROFILE_IDS, turnProfileId } from './profiles.mjs';
 import { BOOK_DIR as VIBE_BOOK_DIR, loadBook as vibeLoadBook, loadRun as vibeLoadRun, publicState as vibePublicState } from './agent/vibe-state.mjs';
 import { createPinnedModel, pinConfig } from './pinned-model.mjs';
 import { createActivityLog, createModelReleaser, releaseConfig, scanGames } from './model-release.mjs';
@@ -215,7 +215,7 @@ const native=createNativeControl({control,ready:bundledEngine,appUpdater,hardwar
    pinned component (STRATA_HARNESS_DIR), not part of this host, so its absence is a visible capability
    state and the chat falls back to the direct path with a notice, never silently to another model. */
 // What the person chose in Settings -> Tools (tool groups, web search service and key, the browser, their own tools).
-const llmProxy = createLlmProxy({ targetOf: key => agent.llmTarget(key), samplingNow: () => samplingFromExpert(store.get().expert), profileOf: id => (PROFILE_IDS.includes(id) ? profileStore.get(id) : null), memoryOf: profileMemory });
+const llmProxy = createLlmProxy({ targetOf: key => agent.llmTarget(key), samplingNow: () => samplingFromExpert(store.get().expert), profileOf: id => profileStore.resolve(id), memoryOf: profileMemory });
 const agentTools = createAgentTools({ read: () => store.get().agentTools, write: value => store.update({ agentTools: value }), dataDir: store.DATA_DIR, browser: () => ({ ...findBrowser(), cli: findPlaywrightMcp(agent.harnessDir()) }) });
 agentTools.ensureFile();
 const visionProbe = createVisionProbe();
@@ -698,7 +698,9 @@ async function runAgentTurn({ res, controller, chatId, body, message, workspaceI
     const researchLine = /^\/research(?:\s+([\s\S]*))?$/i.exec(message.trim());
     // "/compact" summarises the older messages of this chat now (it used to go to the model as text, which answered it as a question).
     const compactLine = /^\/compact\s*$/i.test(message.trim());
-    const turnOptions = { chatId, message, workspacePath: cwd, choice, images, profile: PROFILE_IDS.includes(body.profile) ? body.profile : null, mode: typeof body.mode === 'string' ? body.mode : null, thinking: typeof body.thinking === 'string' ? body.thinking : null, thinkingBudget: Number.isFinite(body.thinkingBudget) ? body.thinkingBudget : 0, history: Array.isArray(body.history) ? body.history : [], onFrame: write, signal: controller.signal };
+    // Offline (a Chat chat's switch): the turn runs on the chat-offline profile, which has no tool that reaches the web (profiles.mjs).
+    if (body.offline === true && researchLine) { write({ type: 'error', message: 'Research needs the web, and this chat is offline. Turn Offline off to research.', code: 'offline' }); settle(null); return; }
+    const turnOptions = { chatId, message, workspacePath: cwd, choice, images, profile: turnProfileId(body.profile, body.offline), mode: typeof body.mode === 'string' ? body.mode : null, thinking: typeof body.thinking === 'string' ? body.thinking : null, thinkingBudget: Number.isFinite(body.thinkingBudget) ? body.thinkingBudget : 0, history: Array.isArray(body.history) ? body.history : [], onFrame: write, signal: controller.signal };
     const result = typeof body.planId === 'string' && body.message === '/plan start' ? await agent.planGoal({ ...turnOptions, planId: body.planId })
       : compactLine ? await agent.compactCommand(turnOptions)
       : researchLine ? await agent.researchCommand({ ...turnOptions, line: researchLine[1] ?? '' })
@@ -2223,6 +2225,9 @@ async function api(req, res, path, method, url) {
     const chatProfile = profileStore.get(typeof body.profile === 'string' ? body.profile : 'chat');
     if (!chatProfile.agent) body.agent = false;
     if (PIN) { try { body.remoteModel = await pinned.ensure(); } catch (e) { return error(res, 503, e.message); } }
+    // Offline: a model on the internet would carry the chat off this computer, so the turn is not sent (a model here or on the home network is fine).
+    if (body.offline === true && body.remoteModel) { const own = modelProviders.withSecrets().find(c => c.id === body.remoteModel.connectionId); if (own && !isPrivateHost(own.baseUrl)) return error(res, 409, offlineModelRefusal(own.models.find(m => m.id === body.remoteModel.modelId)?.name ?? own.name), { code: 'offline-model' }); }
+    if (body.offline === true) body.useTools = false;
     let images;try{const named=Array.isArray(body.imageIds)&&body.imageIds.length?uploads.dataUrls(typeof body.sessionId==='string'?body.sessionId:'',body.imageIds):[];images=validateChatImages([...(Array.isArray(body.images)?body.images:[]),...named]);}catch(e){return error(res,400,e.message);}
     if(images.length&&body.remoteModel){const own=modelProviders.withSecrets().find(c=>c.id===body.remoteModel.connectionId);const row=own?.models.find(m=>m.id===body.remoteModel.modelId);const refused=await pictureRefusal(own,row);if(refused)return error(res,409,refused);}
     else if(images.length){let selected;try{selected=native.resolveInstance(body.nativeModelId??native.state().defaultId);}catch(e){return error(res,409,e.message);}if(!selected.vision)return error(res,409,'This model was started without picture reading. Open Models, turn on Read pictures and load it again, or choose a model that reads pictures.');}

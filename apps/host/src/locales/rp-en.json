@@ -410,5 +410,9 @@
   "rp420": "Trigger words",
   "rp421": "Added to the start of your prompt while this LoRA is on",
   "rp422": "(added for you)",
-  "rp423": "Add to your prompt"
+  "rp423": "Add to your prompt",
+  "rp424": "Offline",
+  "rp425": "Offline: no internet for the assistant. Web search, web pages and connected tools are off, and a model on the internet is not used.",
+  "rp426": "Offline: this roleplay never uses a model on the internet.",
+  "rp427": "Online: the assistant may search the web and read pages. Turn on Offline to cut it off from the internet."
 }

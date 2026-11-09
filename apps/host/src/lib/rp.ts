@@ -127,7 +127,7 @@ export async function rpGenerate(sessionId: string, mode: Mode, opts: { speakerI
   };
   const started = performance.now();
   try {
-    await streamPost('/api/rp/generate', { sessionId, chat: session.rp, history, mode: mode === 'swipe' ? 'normal' : mode, speakerId, thinking: session.preferences?.thinking }, frame => {
+    await streamPost('/api/rp/generate', { sessionId, chat: session.rp, history, mode: mode === 'swipe' ? 'normal' : mode, speakerId, thinking: session.preferences?.thinking, ...(session.preferences?.offline ? { offline: true } : {}) }, frame => {
       const type = String(frame.type);
       if (type === 'rp-speaker') { const id = String(frame.id ?? ''), name = String(frame.name ?? ''); if (mode === 'normal' || mode === 'swipe') patch(m => ({ ...m, characterId: id || undefined, name })); }
       else if (type === 'delta') { text += String(frame.text ?? ''); timer ??= setTimeout(show, 90); }

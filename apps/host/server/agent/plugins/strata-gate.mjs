@@ -21,7 +21,7 @@
  * The status command `/strata-gate` lets the host confirm the gate is really loaded before it lets a Manual turn
  * start (a Manual chat with no gate would be a chat with the sandbox open and nobody asking).
  */
-import { policyReader, skillAllowed, toolAllowed } from '../../profiles.mjs';
+import { OFFLINE_REFUSAL, isWebTool, policyReader, skillAllowed, toolAllowed } from '../../profiles.mjs';
 import { BOOK_DIR, checkpoint, inside, loadRun, rootOfSession, saveRun } from '../vibe-state.mjs';
 
 export const name = 'strata-gate';
@@ -529,7 +529,7 @@ export function apply(ctx, config = {}) {
     const profile = profileOf(chatOf(agent.session));
     if (profile) {
       const args = exec.arguments && typeof exec.arguments === 'object' ? exec.arguments : {};
-      if (!toolAllowed(profile, exec.name)) return { kind: 'deny', reason: `The ${profile.name} profile does not allow the ${exec.name} tool. Go on without it and say so if it matters.` };
+      if (!toolAllowed(profile, exec.name)) return { kind: 'deny', reason: profile.offline && isWebTool(exec.name) ? OFFLINE_REFUSAL : `The ${profile.name} profile does not allow the ${exec.name} tool. Go on without it and say so if it matters.` };
       if (exec.name === 'skill' && !skillAllowed(profile, args.name)) return { kind: 'deny', reason: `The ${profile.name} profile does not allow the skill "${args.name}". Go on without it.` };
     }
     if (profile?.id === 'vibe' && config.vibe?.stateDir) {

@@ -188,6 +188,44 @@ export function normalizeProfile(id, raw = {}) {
   };
 }
 
+/**
+ * Offline: a Chat chat the person cut off from the internet (the composer's Offline switch, preferences.offline). Its turns run on the
+ * chat's profile with every tool that reaches the web taken away (web search, web fetch, every connected tool, the helpers that need
+ * them) and a line in the prompt that says so; the gate refuses those tools by the same rule if the model names one anyway. It is a
+ * profile of its own (`chat-offline`) so the model route, the gate's policy file and the forwarding endpoint all carry it.
+ * Roleplay has no tools at all; its Offline switch only refuses a model that is not on this computer or network (index.mjs).
+ */
+export const OFFLINE_PROFILES = Object.freeze(['chat']);
+export const offlineId = id => `${id}-offline`;
+/** Every profile a model route or a Harness session can be marked with. */
+export const ROUTE_PROFILE_IDS = Object.freeze([...PROFILE_IDS, ...OFFLINE_PROFILES.map(offlineId)]);
+export const WEB_TOOL_GROUPS = Object.freeze(['fetch', 'search']);
+export const OFFLINE_PROMPT = 'This chat is offline: you have no internet access. Web search, web fetch and every connected tool are switched off, and any attempt is refused. Answer from what you already know, say plainly when an answer may be out of date or needs the web, and never claim you looked something up.';
+/** An offline chat on a model that runs on the internet: the chat itself would leave this computer, so it is not sent. */
+export const offlineModelRefusal = name => `This chat is offline, and its model (${name}) runs on the internet. Choose a model on this computer or turn Offline off.`;
+export const OFFLINE_REFUSAL = 'This chat is offline: it has no internet access, so this tool is not available. Go on without the web and say so if it matters.';
+/** A tool an offline chat may not use: web search and fetch, and every connected tool (an MCP server can reach anything). */
+export const isWebTool = name => WEB_TOOL_GROUPS.includes(GROUP_OF.get(String(name ?? ''))) || (String(name ?? '').startsWith('mcp__') && !String(name).startsWith(MEMORY_TOOL_PREFIX));
+/** The profile of an offline chat: `profile` with the web taken away. */
+export function offlineProfile(profile) {
+  const groups = { ...profile.tools.groups };
+  for (const g of WEB_TOOL_GROUPS) groups[g] = false;
+  const needsWeb = a => Array.isArray(a.tools) && a.tools.some(t => WEB_TOOL_GROUPS.includes(t) || WEB_TOOL_GROUPS.includes(GROUP_OF.get(t)));
+  return {
+    ...profile, id: offlineId(profile.id), name: `${profile.name} (offline)`, offline: true,
+    systemPrompt: [profile.systemPrompt.trim(), OFFLINE_PROMPT].filter(Boolean).join('\n\n'),
+    tools: { groups, connected: false }, webWithoutAsking: false,
+    agents: profile.agents.filter(a => !needsWeb(a)),
+  };
+}
+/** The route profile of a turn: the chat's profile, or its offline copy when the chat is offline and that profile has one. */
+export function turnProfileId(profileId, offline) {
+  const id = PROFILE_IDS.includes(profileId) ? profileId : null;
+  if (offline !== true) return id;
+  const base = id ?? 'chat';
+  return OFFLINE_PROFILES.includes(base) ? offlineId(base) : id;
+}
+
 /** May this profile use the tool `name`? Connected tools (MCP servers, the browser, the person's own) follow one switch. */
 export function toolAllowed(profile, name) {
   if (!profile) return true;
@@ -313,12 +351,15 @@ export function createProfileStore({ dataDir, changed = () => {} }) {
   } catch { /* a damaged file: the defaults, rewritten on the next save */ }
   let sessions = {};
   try { if (existsSync(policyFile)) sessions = JSON.parse(readFileSync(policyFile, 'utf8'))?.sessions ?? {}; } catch { sessions = {}; }
-  const writePolicy = () => writeJson(policyFile, { profiles, sessions });
+  const routeProfiles = () => ({ ...profiles, ...Object.fromEntries(OFFLINE_PROFILES.map(id => [offlineId(id), offlineProfile(profiles[id])])) });
+  const writePolicy = () => writeJson(policyFile, { profiles: routeProfiles(), sessions });
   writePolicy();
   return {
     policyFile,
     list: () => profiles,
     get: id => profiles[PROFILE_IDS.includes(id) ? id : 'chat'],
+    /** A route profile (a chat profile or its offline copy), or null for anything else. */
+    resolve: id => (ROUTE_PROFILE_IDS.includes(id) ? routeProfiles()[id] : null),
     save(id, raw) {
       if (!PROFILE_IDS.includes(id)) throw new Error(`Unknown profile ${id}`);
       profiles = { ...profiles, [id]: normalizeProfile(id, raw) };
@@ -331,7 +372,7 @@ export function createProfileStore({ dataDir, changed = () => {} }) {
     /** The gate learns which profile a Harness session (one chat) is in. */
     bindSession(harnessSessionId, profileId) {
       if (!harnessSessionId || sessions[harnessSessionId] === profileId) return;
-      sessions = { ...sessions, [harnessSessionId]: PROFILE_IDS.includes(profileId) ? profileId : 'chat' };
+      sessions = { ...sessions, [harnessSessionId]: ROUTE_PROFILE_IDS.includes(profileId) ? profileId : 'chat' };
       writePolicy();
     },
   };

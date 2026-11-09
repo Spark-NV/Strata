@@ -20,6 +20,8 @@ import { json, error, readBody } from '../util.mjs';
 import { BLANK_PNG, bookToWorldInfo, characterToCard, isPng, pngWithCard, readImport } from './cards.mjs';
 import { buildRpPrompt, finishReply, selectSpeaker } from './prompt.mjs';
 import { normalizeAuthorsNote } from './store.mjs';
+import { isPrivateHost } from '../agent/llm-shape.mjs';
+import { offlineModelRefusal } from '../profiles.mjs';
 
 const MODES = ['normal', 'continue', 'impersonate'];
 
@@ -55,7 +57,9 @@ export function createRpRoutes({ rp, modelProviders, pinned, profileStore, profi
     if (!speakerId || !c.characters.some(x => x.id === speakerId)) speakerId = c.characters.length > 1 ? selectSpeaker({ characters: c.characters, messages: msgs, strategy: c.settings.group.strategy, allowSelfResponses: c.settings.group.allowSelfResponses, muted: c.muted }) : c.characters[0]?.id ?? null;
     const selection = pinned ? await pinned.ensure() : body.remoteModel;
     if (!selection) throw new Error('Choose a model first.');
-    const { model } = modelProviders.resolve(selection);
+    const { connection, model } = modelProviders.resolve(selection);
+    // Offline (the chat's switch): roleplay has no tools, so the one way out is a model on the internet; that is refused.
+    if (body.offline === true && !isPrivateHost(connection.baseUrl)) throw Object.assign(new Error(offlineModelRefusal(model.name || connection.name)), { code: 'offline-model' });
     const built = buildRpPrompt({ settings: c.settings, characters: c.characters, speakerId, persona: c.persona, books: c.books, history: msgs, authorsNote: c.authorsNote, mode, contextMax: model.contextMax || 32768, vars: c.vars, chatId: String(body.sessionId ?? ''), model: model.name });
     return { ...built, selection, model, settings: c.settings, mode };
   }
@@ -130,7 +134,7 @@ export function createRpRoutes({ rp, modelProviders, pinned, profileStore, profi
   async function generate(req, res) {
     const body = await readBody(req, 20 * 1024 * 1024);
     let p;
-    try { p = await plan(body); } catch (e) { error(res, /model/i.test(e.message) ? 503 : 400, e.message); return; }
+    try { p = await plan(body); } catch (e) { error(res, e.code === 'offline-model' ? 409 : /model/i.test(e.message) ? 503 : 400, e.message); return; }
     res.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive' });
     const write = frame => { if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(frame)}\n`); };
     const controller = new AbortController();

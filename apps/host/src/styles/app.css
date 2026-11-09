@@ -5662,6 +5662,7 @@ textarea.config-editor.st-input {
 .composer-choice { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--st-ink-muted); padding: 7px 4px; border-radius: 8px; font: inherit; font-size: 12px; cursor: pointer; max-width: 100%; }
 .composer-choice:hover { background: var(--st-surface-2); color: var(--st-ink); }
 .composer-choice:disabled { opacity: .5; cursor: default; }
+.composer-choice.composer-offline[aria-pressed="true"], .composer-choice.composer-offline[aria-pressed="true"]:hover { color: var(--st-accent, #3b82f6); background: color-mix(in srgb, var(--st-accent, #3b82f6) 14%, transparent); padding-inline: 8px; }
 .composer-model span { max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .composer-file-error { border: 0; background: transparent; color: var(--st-danger-text); font: inherit; font-size: 12px; }
 .model-choice-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--st-line); }
@@ -5753,6 +5754,7 @@ textarea.config-editor.st-input {
   .st-composer__bar > .spacer { display: none; }
   .composer-add { grid-column: 1; grid-row: 1; }
   .composer-choice:not(.composer-model):not(.composer-effort) { grid-column: 2 / 5; grid-row: 1; justify-self: start; }
+  .composer-choice.composer-offline { grid-column: 2 / 5; grid-row: 1; justify-self: end; }
   .composer-model { grid-column: 1 / 3; grid-row: 2; justify-self: start; }
   .composer-effort { grid-column: 3; grid-row: 2; }
   .st-composer__bar > .st-btn { grid-column: 4; grid-row: 2; }
@@ -5830,6 +5832,7 @@ button.menu__item:disabled { opacity: .5; cursor: default; }
   .chatsplit[data-preview='true'] .st-composer__bar > .spacer { display: none; }
   .chatsplit[data-preview='true'] .composer-add { grid-column: 1; grid-row: 1; }
   .chatsplit[data-preview='true'] .composer-choice:not(.composer-model):not(.composer-effort) { grid-column: 2 / 5; grid-row: 1; justify-self: start; }
+  .chatsplit[data-preview='true'] .composer-choice.composer-offline { grid-column: 2 / 5; grid-row: 1; justify-self: end; }
   .chatsplit[data-preview='true'] .composer-model { grid-column: 1 / 3; grid-row: 2; }
   .chatsplit[data-preview='true'] .composer-effort { grid-column: 3; grid-row: 2; }
   .chatsplit[data-preview='true'] .st-composer__bar > .st-btn { grid-column: 4; grid-row: 2; }

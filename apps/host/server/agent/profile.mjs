@@ -23,7 +23,7 @@ import { standardPreset } from './preset.mjs';
 import { validMcpName } from '../mcp-names.mjs';
 import { BUDGETS, isPrivateHost } from './llm-shape.mjs';
 import { DDG_PROVIDER_ID } from '../web-search-ddg.mjs';
-import { PROFILE_IDS } from '../profiles.mjs';
+import { ROUTE_PROFILE_IDS } from '../profiles.mjs';
 
 const PROTOCOL = { 'openai-chat': 'openai-completions', 'openai-responses': 'openai-responses', anthropic: 'anthropic-messages' };
 
@@ -209,9 +209,9 @@ export function buildProfile({ local = [], connections = [], gate = true, tools 
   function addShaped(route, def, realBase) {
     if (!proxyBase) return null;
     const keys = { profiles: {} };
-    // One copy per thinking budget, and per budget one for each chat profile (Chat, Code, RP): the forwarding endpoint applies that
+    // One copy per thinking budget, and per budget one for each chat profile (Chat, Code, RP, Vibe, and Chat offline): the forwarding endpoint applies that
     // profile's prompt, sampling, tools and skills (../profiles.mjs). The plain copies carry no profile, as before.
-    for (const profile of [null, ...PROFILE_IDS]) {
+    for (const profile of [null, ...ROUTE_PROFILE_IDS]) {
       for (const budget of [0, ...BUDGETS]) {
         const key = `${route}~s${budget}${profile ? `~${profile}` : ''}`;
         const headers = { ...(def.headers ?? {}), ...(budget ? { 'x-strata-budget': String(budget) } : {}), ...(profile ? { 'x-strata-profile': profile } : {}) };
