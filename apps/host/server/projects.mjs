@@ -1,7 +1,9 @@
 /**
  * Recent projects for Code chats: every folder a chat was pointed at, newest first, plus the person's own additions.
  *
- *   <dataDir>/recent-projects.json   { projects: [{ path, usedAt }] }
+ *   <dataDir>/recent-projects.json   { projects: [{ path, usedAt, origin? }] }
+ *
+ * `origin` ({ via, at }, origin.mjs) says where the project was first added: the iPhone app, the web page from away, this PC. It is set once.
  *
  * Each listed project also says whether it has instructions for coding agents (AGENTS.md, or CLAUDE.md / QWEN.md / GEMINI.md), and its git
  * branch when it is a git checkout. `agentsFile` opens AGENTS.md in the person's editor (Kate, else the system's default), creating a short
@@ -80,17 +82,19 @@ export function createProjects({ file, seed = [] }) {
     list() {
       return list.map(p => {
         const exists = isDir(p.path);
-        return { path: p.path, name: basename(p.path) || p.path, usedAt: p.usedAt, exists, branch: exists ? branchOf(p.path) : null,
+        return { path: p.path, name: basename(p.path) || p.path, usedAt: p.usedAt, ...(p.origin ? { origin: p.origin } : {}), exists, branch: exists ? branchOf(p.path) : null,
           instructions: exists ? INSTRUCTION_FILES.filter(f => existsSync(join(p.path, f))) : [] };
       });
     },
     /** A chat now works in this folder: it moves to the top. */
-    touch(dir) {
+    touch(dir, origin = null) {
       const target = check(dir);
-      list = [{ path: target, usedAt: new Date().toISOString() }, ...list.filter(p => p.path !== target)].slice(0, MAX);
+      const was = list.find(p => p.path === target);
+      const first = was ? was.origin : origin;
+      list = [{ path: target, usedAt: new Date().toISOString(), ...(first ? { origin: first } : {}) }, ...list.filter(p => p.path !== target)].slice(0, MAX);
       save();
     },
-    add(dir) { const target = check(dir); if (!list.some(p => p.path === target)) { list = [{ path: target, usedAt: null }, ...list].slice(0, MAX); save(); } },
+    add(dir, origin = null) { const target = check(dir); if (!list.some(p => p.path === target)) { list = [{ path: target, usedAt: null, ...(origin ? { origin } : {}) }, ...list].slice(0, MAX); save(); } },
     remove(dir) { list = list.filter(p => p.path !== dir); save(); },
     /** Open AGENTS.md in an editor, creating the starting file when the project has none. */
     openAgentsFile(dir, { editor = process.env.STRATA_EDITOR || 'kate' } = {}) {

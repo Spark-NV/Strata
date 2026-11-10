@@ -5586,6 +5586,8 @@ textarea.config-editor.st-input {
 .ws__head .nav-search { margin: 0; padding: 0 4px 0 12px; min-width: 0; min-height: 36px; }
 .ws__head .nav-search .st-btn { flex: none; width: 28px; height: 28px; }
 .navsession__time { flex: none; margin-left: auto; font-size: var(--st-fs-xs); color: var(--st-ink-muted); }
+/* Where the chat was started (the iPhone app, the web page from away): a quiet tag after the title. */
+.navsession__origin { flex: none; margin-left: 6px; font-size: var(--st-fs-xs); color: var(--st-ink-muted); }
 .ws__session { padding-left: 16px; }
 .navsessions { gap: 4px; }
 .chat-toolbar { display: flex; align-items: center; justify-content: flex-end; flex: none; min-height: 48px; padding: 4px 24px; }

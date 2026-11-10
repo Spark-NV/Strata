@@ -121,12 +121,14 @@ export class TransportError extends Error {
   constructor(message: string, readonly status: number, readonly code: string | undefined, readonly network = false) { super(message); this.name = 'TransportError'; }
 }
 
-export interface HostChatEntry { id: string; rev: number; createdAt?: string | null; updatedAt?: string | null }
+/** Where the host says a chat was started (server/origin.mjs); chats from before have none. */
+export interface ChatOrigin { via: 'ios-app' | 'remote-web' | 'pc' | 'remote-api' | 'local-api'; at: string }
+export interface HostChatEntry { id: string; rev: number; createdAt?: string | null; updatedAt?: string | null; origin?: ChatOrigin }
 
 /** What the page asks of the host about chats (chat-sync.ts makes the real one; a test passes a fake). */
 export interface ChatTransport {
   list(): Promise<{ chats: HostChatEntry[]; damaged?: string[] }>;
-  get(id: string): Promise<{ rev: number; session: Session } | null>;
+  get(id: string): Promise<{ rev: number; session: Session; origin?: ChatOrigin } | null>;
   put(id: string, text: string, baseRev: number | null): Promise<{ rev: number; conflict: boolean }>;
   remove(id: string): Promise<void>;
   importMany(sessions: Session[]): Promise<{ imported: string[]; skipped: string[]; failed: { id: string; error: string; code?: string }[] }>;

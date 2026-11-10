@@ -134,3 +134,27 @@ message twice. Nothing changes for requests without it; the desktop app does not
   pictures kept in `chats/media/<id>/`, the same approval / answer / Stop again answered `already`.
 
 The iPhone docs (`~/Videos/Working/10-PHASE1.md`) hold every request and frame, with real captures.
+
+## Where a chat was started, and deletes
+
+- Every chat and recent project records where it was started (`origin`: `ios-app`, `remote-web`, `pc`, `remote-api`,
+  `local-api`), from `x-strata-client` and the remote listener's `x-strata-remote` (`server/origin.mjs`). It is written once,
+  outside the session, so no later save changes it. The chat list shows a small "iPhone" or "Web" tag.
+- Deleting a chat stops a reply still being written in it (Strata's own turn and the agent's). Watchers get a last frame
+  `error` with code `deleted`. `GET /api/chats/{id}` of a deleted chat answers 404 with code `deleted`.
+  `GET /api/chats?deletedSince=<ISO>` lists the chats deleted since then, for a device that was away.
+
+## Weak connections, phases 2 and 3
+
+All opt-in; the desktop is unchanged. The phone's reference is `Videos/Working/12-PHASE2-3.md`.
+
+- `POST /api/chats/{id}/messages` (upsert, remove, after): message edits without the whole chat.
+- Persisted turns number every frame (`seq`) and keep them 10 minutes after the end. The same request with `after`, or
+  `POST /api/chat/attach|rp/attach|images/attach {turnId|requestId, after}`, sends only what is missing.
+- Persisted roleplay and pictures keep running without a connection. Stop with `/api/rp/stop`, `/api/images/stop` or
+  `/api/chat/stop`. `GET /api/chat/turns` lists running turns; the `turns` event carries `waiting`.
+- Event streams with `topics` carry SSE ids; `Last-Event-ID` replays missed events, or sends `event: reset`.
+- `GET /api/chats` entries carry kind, flags, count, preview, working and waiting; `?since=<cursor>` sends only changes.
+  `?last=N` and `?before=<id>&limit=N` page long chats; a paged copy (`session.partial`) cannot be saved whole.
+- `x-strata-upload-key` (sha256) makes uploads and picture references safe to repeat; `HEAD /api/images/ref/<sha256>`;
+  raw JPEG/PNG/WebP picture references; `content-encoding: gzip` request bodies.

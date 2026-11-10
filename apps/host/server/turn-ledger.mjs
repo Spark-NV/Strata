@@ -7,16 +7,19 @@
  *   turn is joined, a finished one is answered from the chat. Records are kept 24 hours and survive a restart.
  * - `state`: running | done | error | stopped | refused (refused: nothing started; `status` and `error` are the answer it got).
  * - A turn that was `running` when the host stopped is returned by `interrupted()` at start, so its reply can be closed.
- * - Each running turn keeps its frames in memory (at most 5,000, with text pieces joined) and has subscribers: the request that started it
- *   and any repeat that joined. `onIdle` runs when the last subscriber leaves (the caller decides whether that stops the turn).
+ * - Each turn keeps its frames in memory while it runs and for 10 minutes after it ends (at most 5,000, with text pieces joined), each
+ *   numbered `seq` 1, 2, 3…, so a client that lost the stream asks for the frames after the last one it has (`after`). Subscribers are the
+ *   request that started it and any repeat or attach. `onIdle` runs when the last subscriber leaves (the caller decides whether that stops
+ *   the turn).
  */
 import { readFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const KEEP_MS = 24 * 3600_000;
 const MAX_FRAMES = 5000;
+const KEEP_FRAMES_MS = 10 * 60_000;
 
-export function createTurnLedger({ file, now = () => Date.now(), changed = () => {} }) {
+export function createTurnLedger({ file, now = () => Date.now(), changed = () => {}, keepFramesMs = KEEP_FRAMES_MS }) {
   let turns = {};
   try { const parsed = JSON.parse(readFileSync(file, 'utf8')); if (parsed?.v === 1 && parsed.turns && typeof parsed.turns === 'object') turns = parsed.turns; } catch { /* first start */ }
   const stranded = Object.entries(turns).filter(([, t]) => t.state === 'running').map(([turnId, t]) => ({ turnId, ...t }));
@@ -27,29 +30,66 @@ export function createTurnLedger({ file, now = () => Date.now(), changed = () =>
     for (const [id, t] of Object.entries(turns)) if (t.state !== 'running' && (t.endedAt ?? t.at ?? 0) < cutoff) delete turns[id];
     try { mkdirSync(dirname(file), { recursive: true }); const tmp = `${file}.tmp`; writeFileSync(tmp, JSON.stringify({ v: 1, turns }), { mode: 0o600 }); renameSync(tmp, file); } catch { /* kept in memory */ }
   }
-  const view = (turnId, t) => ({ turnId, chatId: t.chatId, replyId: t.replyId, kind: t.kind, state: t.state, requestId: t.requestId ?? null, rev: t.rev ?? null, ...(t.error ? { error: t.error } : {}), ...(t.code ? { code: t.code } : {}) });
+  const view = (turnId, t) => ({ turnId, chatId: t.chatId, replyId: t.replyId, kind: t.kind, state: t.state, requestId: t.requestId ?? null, rev: t.rev ?? null, ...(t.state === 'running' ? { waiting: !!t.waiting } : {}), ...(t.error ? { error: t.error } : {}), ...(t.code ? { code: t.code } : {}) });
 
   function createRun(turnId) {
-    const frames = [];
+    // Kept frames: { f, from, cuts }. A run of text pieces (delta or reasoning with nothing else) is joined into one frame; `cuts` holds the
+    // text length after each piece, so a resume from the middle of the run sends exactly the missing part.
+    const kept = [];
+    let seq = 0, dropped = 0;
     const subs = new Set();
     let endedResolve;
     const ended = new Promise(r => { endedResolve = r; });
     let onIdle = () => {};
     let finished = false;
+    const textOnly = frame => (frame.type === 'delta' || frame.type === 'reasoning') && Object.keys(frame).every(k => k === 'type' || k === 'text' || k === 'seq');
+    /** The kept frames after `after` (all of them for null), or null when some of those are no longer kept. */
+    function since(after) {
+      if (after === null) return kept.map(k => k.f);
+      if (after < dropped) return null;
+      const out = [];
+      for (const k of kept) {
+        if (k.f.seq <= after) continue;
+        if (k.cuts && after >= k.from) out.push({ ...k.f, text: k.f.text.slice(k.cuts[after - k.from]) });
+        else out.push(k.f);
+      }
+      return out;
+    }
     return {
       turnId,
       ended,
+      replyIds: null,
+      requestIds: new Set(),
+      /** What the reply holds so far, for a resume that comes too late for the kept frames (set by the caller). */
+      snapshot: () => null,
       get finished() { return finished; },
+      get seq() { return seq; },
       set onIdle(fn) { onIdle = fn; },
       push(frame) {
-        const last = frames.at(-1);
-        if (last && (frame.type === 'delta' || frame.type === 'reasoning') && last.type === frame.type && Object.keys(frame).length === 2 && Object.keys(last).length === 2) last.text += frame.text;
-        else if (frame.type !== 'beat') { frames.push(frame.type === 'delta' || frame.type === 'reasoning' ? { ...frame } : frame); if (frames.length > MAX_FRAMES) frames.splice(1, frames.length - MAX_FRAMES); }
-        for (const fn of [...subs]) { try { fn(frame); } catch { subs.delete(fn); } }
+        if (frame.type === 'beat') { for (const fn of [...subs]) { try { fn(frame); } catch { subs.delete(fn); } } return; }
+        // Every frame is numbered (1, 2, 3… per turn). A frame's own `seq` (the agent's status lines) moves to `statusSeq`.
+        const numbered = { ...frame, ...(frame.seq !== undefined ? { statusSeq: frame.seq } : {}), seq: ++seq };
+        const last = kept.at(-1);
+        if (last?.cuts && textOnly(frame) && last.f.type === frame.type) { last.f = { ...last.f, text: last.f.text + frame.text, seq }; last.cuts.push(last.f.text.length); }
+        else {
+          kept.push(textOnly(frame) ? { f: { type: frame.type, text: frame.text, seq }, from: seq, cuts: [String(frame.text).length] } : { f: numbered, from: seq });
+          if (kept.length > MAX_FRAMES) { const gone = kept.splice(0, kept.length - MAX_FRAMES); dropped = gone.at(-1).f.seq; }
+        }
+        if (frame.requestId) this.requestIds.add(frame.requestId);
+        for (const fn of [...subs]) { try { fn(numbered); } catch { subs.delete(fn); } }
       },
-      /** Send everything so far to `fn`, then the live frames, until `signal` aborts. */
-      subscribe(fn, signal) {
-        for (const f of frames) fn(f);
+      /**
+       * Send the frames after `after` (everything for null) to `fn`, then the live frames, until `signal` aborts. When the frames after
+       * `after` are no longer kept, one `resync` with the reply so far comes first, then the kept frames that follow.
+       */
+      subscribe(fn, signal, after = null) {
+        const missed = since(after);
+        if (missed) for (const f of missed) fn(f);
+        else {
+          fn({ type: 'resync', ...(this.snapshot() ?? {}), seq: dropped });
+          for (const f of since(dropped)) fn(f);
+        }
+        if (finished) return;
         subs.add(fn);
         signal?.addEventListener('abort', () => { subs.delete(fn); if (!subs.size && !finished) onIdle(); }, { once: true });
       },
@@ -87,14 +127,29 @@ export function createTurnLedger({ file, now = () => Date.now(), changed = () =>
       return run;
     },
     update(turnId, values) { if (turns[turnId]) { Object.assign(turns[turnId], values); save(); } },
+    /** A running turn now waits for the person (an approval or a question), or no longer does: told to the `turns` event. */
+    waiting(turnId, value) {
+      const t = turns[turnId];
+      if (!t || t.state !== 'running' || !!t.waiting === value) return;
+      t.waiting = value;
+      changed(view(turnId, t));
+    },
+    /** The turn a requestId belongs to: its own, or one its frames named (the agent's). */
+    byRequest(requestId) {
+      for (const [id, t] of Object.entries(turns)) if (t.requestId === requestId || runs.get(id)?.requestIds.has(requestId)) return view(id, t);
+      return null;
+    },
     /** Close a turn: done, error or stopped (with the chat's revision that holds the final reply). */
     end(turnId, { state, error = null, code = null, rev = null }) {
       const t = turns[turnId];
       if (!t) return;
       Object.assign(t, { state, endedAt: now(), ...(error ? { error } : {}), ...(code ? { code } : {}), ...(rev !== null ? { rev } : {}) });
+      delete t.waiting;
       save();
-      runs.get(turnId)?.finish();
-      runs.delete(turnId);
+      const run = runs.get(turnId);
+      run?.finish();
+      // Its frames stay 10 minutes for a client that comes back (resume with `after`), then go.
+      if (run) setTimeout(() => { if (runs.get(turnId) === run) runs.delete(turnId); }, keepFramesMs).unref?.();
       changed(view(turnId, t));
     },
     /** A turn refused before it started: a repeat of it gets the same answer. */

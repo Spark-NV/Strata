@@ -25,12 +25,14 @@ test('events: no topics sends everything as before; topics send only those; moni
   hub.send('monitor', { big: 'x'.repeat(100) });
   hub.send('monitor', { big: 'y' });
   hub.send('chats', { id: 's' });
-  const names = r => r.out.filter(s => s.startsWith('event:')).map(s => s.split('\n')[0].slice(7));
+  const names = r => r.out.map(s => /^event: (.+)$/m.exec(s)?.[1]).filter(Boolean);
   assert.deepEqual(names(all), ['monitor', 'monitor', 'chats']);
   assert.deepEqual(names(phone), ['chats']);
   assert.deepEqual(names(sheet), ['monitor'], 'the second monitor within a minute is skipped');
   assert.deepEqual(eventOptions(new URLSearchParams('')), { topics: null, monitorEveryMs: 0 });
   for (const r of [all, phone, sheet]) r.close();
+  assert.equal(all.out.some(s => s.startsWith('id:')), false, 'the desktop\'s stream (no topics) carries no ids, as before');
+  assert.match(phone.out.find(s => s.includes('event: chats')), /^id: [a-z0-9]+-\d+\n/);
 });
 
 test('pictures a saved message names belong to its chat: never swept, served as before, removed with the chat', t => {
@@ -68,4 +70,31 @@ test('roleplay turns Strata saves: a new reply, a swipe, a continue and imperson
   assert.throws(() => prepareRpTurn({ rpTarget: { kind: 'continue', messageId: 'g' } }, s), e => e.status === 400);
   assert.equal(prepareRpTurn({ rpTarget: { kind: 'impersonate' } }, s).session, null, 'impersonate saves nothing');
   assert.throws(() => prepareRpTurn({ replyId: 'r1' }, s), e => e.code === 'id-taken');
+});
+
+test('events survive a reconnect: the missed ones come again after Last-Event-ID; too old or another run of the host gets reset', () => {
+  const hub = new EventHub({ keepMs: 0, keepCount: 3 });
+  const first = fakeRes();
+  hub.add(first, eventOptions(new URLSearchParams('topics=chats,turns')));
+  hub.send('chats', { id: 'a' });
+  const lastId = /^id: (\S+)/.exec(first.out.find(s => s.startsWith('id:')))[1];
+  first.close();
+  hub.send('monitor', { big: 1 });
+  hub.send('chats', { id: 'b' });
+  hub.send('pinned', { x: 1 });
+  hub.send('turns', { turnId: 't' });
+  const back = fakeRes();
+  hub.add(back, eventOptions(new URLSearchParams('topics=chats,turns'), { 'last-event-id': lastId }));
+  const replayed = back.out.filter(s => s.startsWith('id:')).map(s => /^event: (.+)$/m.exec(s)[1]);
+  assert.deepEqual(replayed, ['chats', 'turns'], 'only the asked topics, never monitor');
+  back.close();
+  hub.send('chats', { id: 'c' }); hub.send('chats', { id: 'd' }); hub.send('chats', { id: 'e' });
+  const late = fakeRes();
+  hub.add(late, eventOptions(new URLSearchParams('topics=chats'), { 'last-event-id': lastId }));
+  assert.ok(late.out.some(s => s.includes('event: reset')), 'the missed events are no longer kept');
+  late.close();
+  const other = fakeRes();
+  hub.add(other, eventOptions(new URLSearchParams('ids=1&lastEventId=zzzz-1')));
+  assert.ok(other.out.some(s => s.includes('event: reset')), 'an id from an earlier run of the host');
+  other.close();
 });

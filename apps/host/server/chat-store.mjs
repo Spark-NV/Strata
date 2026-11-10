@@ -1,8 +1,8 @@
 /**
  * The chats, saved by the host as files (owner decision 11-04: the browser's 5 MB storage limit is gone).
  *
- *   <data folder>/chats/index.json         { v: 1, chats: [{ id, rev, createdAt, updatedAt, bytes, title }] }
- *   <data folder>/chats/<id>.json          { "v": 1, "rev": N, "savedAt": ISO, "session": { ...the chat exactly as the page sent it... } }
+ *   <data folder>/chats/index.json         { v: 1, chats: [{ id, rev, createdAt, updatedAt, bytes, title, origin? }] }
+ *   <data folder>/chats/<id>.json          { "v": 1, "rev": N, "savedAt": ISO, "origin"?: { via, at }, "session": { ...the chat exactly as the page sent it... } }
  *   <data folder>/chats/conflicts/         the version a later save displaced when two windows saved the same chat from an older copy
  *   <data folder>/chats/index.deleted.json { v: 1, deleted: { <id>: ISO } }: chats the person deleted. A save of one of them is refused
  *                                          (410, code `deleted`), so a window that still holds an old copy cannot bring it back.
@@ -18,6 +18,8 @@
  *   top-level field. A save based on an older revision is merged by message id instead of replacing the file, so a device that saves an
  *   older copy never drops what another device or Strata added meanwhile. Strata's own writes (a persisted turn, a PATCH) go through
  *   `update`, on the newest file.
+ * - `origin` says where the chat was started (origin.mjs: the iPhone app, the web page from away, this PC or another program). Strata writes
+ *   it once, with the first save, outside the session, so no device's later save can change or drop it. Chats from before have none.
  * - Owner-only: the folder is created private (POSIX 0700 and files 0600; on Windows the folder gets a protected ACL that its files
  *   inherit), the same level as the rest of the profile.
  */
@@ -43,6 +45,19 @@ export const realIo = {
   },
   rename, unlink, copyFile, readFile, readdir, mkdir,
 };
+
+const VIA = new Set(['ios-app', 'remote-web', 'pc', 'remote-api', 'local-api']);
+/** An origin as stored ({ via, at }), or null for anything else. */
+export const validOrigin = o => (o && typeof o === 'object' && VIA.has(o.via) && typeof o.at === 'string' ? { via: o.via, at: o.at } : null);
+
+/** The first 160 characters of the last message with text, and who wrote it. */
+function previewOf(msgs) {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const text = typeof msgs[i]?.content === 'string' ? msgs[i].content.trim() : '';
+    if (text) return { role: String(msgs[i].role ?? ''), text: Array.from(text.slice(0, 400)).slice(0, 160).join('') };
+  }
+  return null;
+}
 
 export const validChatId = id => typeof id === 'string' && ID.test(id) && !RESERVED.test(id);
 
@@ -74,7 +89,18 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
   let liveReply = () => false;
   let onRemove = () => {};
   const bytesOf = text => Buffer.byteLength(text, 'utf8');
-  const entryOf = (id, rev, session, bytes) => ({ id, rev, createdAt: session?.createdAt ?? null, updatedAt: session?.updatedAt ?? null, bytes, title: typeof session?.title === 'string' ? session.title.slice(0, 200) : '' });
+  // What a chat list needs without opening each chat (phase 3): its kind, flags, how many messages and the last words.
+  const entryOf = (id, rev, session, bytes, origin = null) => {
+    const msgs = Array.isArray(session?.messages) ? session.messages : [];
+    return { id, rev, createdAt: session?.createdAt ?? null, updatedAt: session?.updatedAt ?? null, bytes, title: typeof session?.title === 'string' ? session.title.slice(0, 200) : '',
+      ...(typeof session?.profile === 'string' ? { profile: session.profile } : {}), pinned: session?.pinned === true, archived: session?.archived === true,
+      lastReadAt: typeof session?.lastReadAt === 'string' ? session.lastReadAt : null, messages: msgs.length, preview: previewOf(msgs), ...(origin ? { origin } : {}) };
+  };
+  // Changes since a cursor (phase 3): a counter for this run of the host; a cursor from an earlier run gets the whole list.
+  const boot = Math.random().toString(36).slice(2, 8);
+  let changeCount = 0;
+  const changedAt = new Map(), deletedAt = new Map();   // id -> change number
+  const cursor = () => `c_${boot}_${changeCount}`;
 
   // A chain, so saves of one host never overlap: the file, the index and the conflicts folder change one save at a time.
   let chain = Promise.resolve();
@@ -89,14 +115,15 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
     let saved = null;
     try { const parsed = JSON.parse(readFileSync(join(root, 'index.json'), 'utf8')); if (parsed?.v === CHAT_FORMAT && Array.isArray(parsed.chats)) saved = parsed.chats; } catch { /* rebuilt below */ }
     const map = new Map();
-    if (saved) for (const e of saved) if (e && validChatId(e.id) && files.includes(e.id)) map.set(e.id, e);
+    // Entries written before the list had kinds and previews (no `messages`) are read again from their files, once.
+    if (saved) for (const e of saved) if (e && validChatId(e.id) && files.includes(e.id) && Number.isInteger(e.messages)) map.set(e.id, e);
     // Files the index does not know (a crash before the index was written, an index lost): read from the files.
     for (const id of files) {
       if (map.has(id)) continue;
       try {
         const parsed = JSON.parse(readFileSync(fileOf(id), 'utf8'));
         if (parsed?.v !== CHAT_FORMAT || !parsed.session || parsed.session.id !== id) throw new Error('not a chat file');
-        map.set(id, entryOf(id, Number(parsed.rev) || 1, parsed.session, statSync(fileOf(id)).size));
+        map.set(id, entryOf(id, Number(parsed.rev) || 1, parsed.session, statSync(fileOf(id)).size, validOrigin(parsed.origin)));
       } catch { damaged.add(id); }
     }
     index = map;
@@ -151,12 +178,16 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
     return parsed.session;
   }
   /** Write `session` as the next revision (inside the queue). */
-  async function writeRevision(id, session, text, { persisted = [], meta } = {}) {
-    const rev = (index.get(id)?.rev ?? 0) + 1;
-    const file = `{"v":${CHAT_FORMAT},"rev":${rev},"savedAt":${JSON.stringify(now().toISOString())},"session":${text}}`;
+  async function writeRevision(id, session, text, { persisted = [], meta, origin = null } = {}) {
+    const current = index.get(id);
+    const rev = (current?.rev ?? 0) + 1;
+    // Where the chat was started: set by its first save only, then carried by every later one.
+    const from = current ? current.origin ?? null : validOrigin(origin);
+    const file = `{"v":${CHAT_FORMAT},"rev":${rev},"savedAt":${JSON.stringify(now().toISOString())},${from ? `"origin":${JSON.stringify(from)},` : ''}"session":${text}}`;
     try { await writeAtomic(fileOf(id), file); } catch (e) { throw storeFailure(e); }
     const bytes = bytesOf(file);
-    index.set(id, entryOf(id, rev, session, bytes));
+    index.set(id, entryOf(id, rev, session, bytes, from));
+    changedAt.set(id, ++changeCount); deletedAt.delete(id);
     damaged.delete(id);
     await writeIndex();
     await writeMeta(id, advanceMeta(meta, session, rev, { persisted, now: now().getTime() }));
@@ -170,12 +201,41 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
     /** Called with the id of a chat the person deleted (its pictures go with it). */
     setOnRemove(fn) { onRemove = fn; },
     /** The chats, newest first. */
-    list() {
+    list({ deletedSince = null } = {}) {
       const chats = [...index.values()].sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')) || a.id.localeCompare(b.id));
-      return { v: CHAT_FORMAT, chats, damaged: [...damaged] };
+      if (deletedSince === null) return { v: CHAT_FORMAT, chats, damaged: [...damaged], cursor: cursor() };
+      // Asked for (a device that was away): the chats deleted since then, so it drops its copies of them.
+      const gone = Object.entries(deleted).filter(([, at]) => String(at) > deletedSince).map(([id, at]) => ({ id, at })).sort((a, b) => a.at.localeCompare(b.at));
+      return { v: CHAT_FORMAT, chats, damaged: [...damaged], deleted: gone, now: now().toISOString(), cursor: cursor() };
+    },
+    /** Only what changed since `since` (a cursor from an earlier answer); everything, with full: true, when it cannot tell. */
+    changes(since) {
+      const m = /^c_([a-z0-9]+)_(\d+)$/.exec(String(since ?? ''));
+      if (!m || m[1] !== boot || Number(m[2]) > changeCount) return { v: CHAT_FORMAT, cursor: cursor(), changed: this.list().chats, deleted: [], full: true };
+      const n = Number(m[2]);
+      const changed = [...index.values()].filter(e => (changedAt.get(e.id) ?? 0) > n);
+      const deleted = [...deletedAt].filter(([, at]) => at > n).map(([id]) => id);
+      return { v: CHAT_FORMAT, cursor: cursor(), changed, deleted, full: false };
+    },
+    /** A chat with only its last `last` messages, or the `limit` messages before `before` (phase 3: long chats in pages). */
+    async page(id, { last = null, before = null, limit = 50 } = {}) {
+      const text = await this.read(id);
+      if (text === null) return null;
+      const file = JSON.parse(text);
+      const msgs = Array.isArray(file.session?.messages) ? file.session.messages : [];
+      if (before !== null) {
+        const end = msgs.findIndex(m => m?.id === before);
+        if (end < 0) throw new ChatStoreError('That message is not in this chat.', 404, 'no-message');
+        const from = Math.max(0, end - limit);
+        return { id, rev: file.rev, messages: msgs.slice(from, end), messagesFrom: from, more: from > 0 };
+      }
+      const from = Math.max(0, msgs.length - last);
+      // `partial` marks a copy that is missing messages: a whole-chat save of it is refused, so it can never delete the older ones.
+      return { ...file, session: { ...file.session, messages: msgs.slice(from), ...(from > 0 ? { partial: { messagesFrom: from, messagesTotal: msgs.length } } : {}) }, messagesTotal: msgs.length, messagesFrom: from };
     },
     has: id => index.has(id),
     wasDeleted: id => Object.hasOwn(deleted, id),
+    origin: id => index.get(id)?.origin ?? null,
     rev: id => index.get(id)?.rev ?? 0,
     /** The stored file text of a chat ({"v","rev","savedAt","session"}), or null. */
     async read(id) {
@@ -187,19 +247,20 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
      * Save one chat. `sessionText` is the chat's JSON as the page wrote it. Resolves { id, rev, bytes, conflict }.
      * Rejects with a ChatStoreError (status 400 for a chat that is not a chat, 507 disk full, 403 refused, 500 other): nothing was changed.
      */
-    save(id, sessionText, { baseRev = null, returnChat = false } = {}) {
+    save(id, sessionText, { baseRev = null, returnChat = false, origin = null } = {}) {
       if (!validChatId(id)) return Promise.reject(new ChatStoreError('That is not a chat id.', 400, 'bad-id'));
       let session;
       try { session = JSON.parse(sessionText); } catch { return Promise.reject(new ChatStoreError('The chat must be JSON.', 400, 'bad-json')); }
       if (!session || typeof session !== 'object' || Array.isArray(session) || session.id !== id) return Promise.reject(new ChatStoreError('The chat does not match its id.', 400, 'bad-chat'));
       const body = sessionText.trim();
       if (Object.hasOwn(deleted, id)) return Promise.reject(new ChatStoreError('This chat was deleted.', 410, 'deleted'));
+      if (session.partial) return Promise.reject(new ChatStoreError('This copy of the chat holds only its last messages; change it with PATCH or messages.', 400, 'partial-chat'));
       return queue(async () => {
         const current = index.get(id);
         const stale = !!current && baseRev !== null && Number(baseRev) !== current.rev;
         if (!stale) {
           const meta = await metaFor(id);
-          const { rev, bytes } = await writeRevision(id, session, body, { meta });
+          const { rev, bytes } = await writeRevision(id, session, body, { meta, origin });
           return { id, rev, bytes, conflict: false };
         }
         // Saved from an older copy: the version it would displace is kept (as before), and the save is merged by message id.
@@ -248,6 +309,30 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
         return next;
       }).then(r => (r ? { id, rev: r.rev, conflict, readOnly } : { id, rev: index.get(id)?.rev ?? 0, conflict, readOnly }));
     },
+    /**
+     * Add, change or remove messages (phase 2): `upsert` replaces a message with the same id as a whole, or adds it (after `after`, else at
+     * the end); `remove` deletes by id, unknown ids are ignored. On the newest file, so nothing anyone else saved is lost. The same request
+     * twice changes nothing the second time. 409 turn-running when it would touch a reply a running turn is writing.
+     */
+    messages(id, { upsert = [], remove = [], after = null } = {}, { baseRev = null } = {}) {
+      if (!Array.isArray(upsert) || !Array.isArray(remove)) return Promise.reject(new ChatStoreError('upsert and remove must be lists.', 400, 'bad-messages'));
+      for (const m of upsert) if (!m || typeof m !== 'object' || Array.isArray(m) || !validChatId(m.id) || typeof m.role !== 'string') return Promise.reject(new ChatStoreError('Each message needs an id and a role.', 400, 'bad-messages'));
+      if (new Set(upsert.map(m => m.id)).size !== upsert.length || upsert.some(m => remove.includes(m.id))) return Promise.reject(new ChatStoreError('A message id appears twice.', 400, 'bad-messages'));
+      if (remove.some(r => typeof r !== 'string') || (after !== null && typeof after !== 'string')) return Promise.reject(new ChatStoreError('remove must list ids, and after must be an id.', 400, 'bad-messages'));
+      for (const mid of [...upsert.map(m => m.id), ...remove]) if (liveReply(id, mid)) return Promise.reject(new ChatStoreError('A reply that is still being written cannot be changed.', 409, 'turn-running'));
+      const conflict = baseRev !== null && index.has(id) && Number(baseRev) !== index.get(id).rev;
+      return this.update(id, session => {
+        const list = Array.isArray(session.messages) ? session.messages : [];
+        const byId = new Map(upsert.map(m => [m.id, m]));
+        const gone = new Set(remove);
+        const next = list.filter(m => !gone.has(m?.id)).map(m => byId.get(m?.id) ?? m);
+        const fresh = upsert.filter(m => !list.some(x => x?.id === m.id));
+        const at = after === null ? -1 : next.findIndex(m => m?.id === after);
+        if (at >= 0) next.splice(at + 1, 0, ...fresh); else next.push(...fresh);
+        if (JSON.stringify(next) === JSON.stringify(list)) return null;
+        return { ...session, messages: next, updatedAt: now().toISOString() };
+      }).then(r => (r ? { id, rev: r.rev, conflict } : { id, rev: index.get(id)?.rev ?? 0, conflict, unchanged: true }));
+    },
     /** Delete a chat (the person deleted it). A chat that is not there is already gone. */
     remove(id) {
       if (!validChatId(id)) return Promise.reject(new ChatStoreError('That is not a chat id.', 400, 'bad-id'));
@@ -256,6 +341,7 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
         try { await io.unlink(metaOf(id)); } catch { /* none */ }
         try { onRemove(id); } catch { /* its pictures are cleaned up later */ }
         const had = index.delete(id);
+        changedAt.delete(id); deletedAt.set(id, ++changeCount);
         deleted = { ...deleted, [id]: now().toISOString() };
         try { await writeAtomic(deletedFile, JSON.stringify({ v: CHAT_FORMAT, deleted })); } catch (e) { throw storeFailure(e); }
         await writeIndex();
@@ -263,13 +349,13 @@ export function createChatStore({ dir, io = realIo, privateDir = () => {}, now =
       });
     },
     /** Chats from the browser's old storage: every one the host does not have yet is saved; the ones it has are left alone. */
-    async importMany(sessions) {
+    async importMany(sessions, { origin = null } = {}) {
       const imported = [], skipped = [], failed = [];
       for (const session of Array.isArray(sessions) ? sessions : []) {
         const id = session?.id;
         if (!validChatId(id)) { failed.push({ id: String(id ?? ''), error: 'not a chat id' }); continue; }
         if (index.has(id) || Object.hasOwn(deleted, id)) { skipped.push(id); continue; }
-        try { await this.save(id, JSON.stringify(session)); imported.push(id); }
+        try { await this.save(id, JSON.stringify(session), { origin }); imported.push(id); }
         catch (e) { failed.push({ id, error: e.message, code: e.code }); if (e.code === 'disk-full') break; }
       }
       return { imported, skipped, failed };

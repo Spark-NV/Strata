@@ -1,7 +1,7 @@
 import type { Session } from './types';
 import {
   HOST_FLAG_KEY, PENDING_KEY, TransportError, readBrowserSessions,
-  type ChatTransport, type HostChatEntry, type StorageLike,
+  type ChatOrigin, type ChatTransport, type HostChatEntry, type StorageLike,
 } from './session-persist';
 
 /**
@@ -28,8 +28,8 @@ export function createHttpTransport(fetchImpl: typeof fetch = (...args) => fetch
     async list() { return await (await call('GET', '/api/chats')).json() as { chats: HostChatEntry[]; damaged?: string[] }; },
     async get(id) {
       try {
-        const data = await (await call('GET', `/api/chats/${encodeURIComponent(id)}`)).json() as { rev: number; session: Session };
-        return { rev: Number(data.rev) || 0, session: data.session };
+        const data = await (await call('GET', `/api/chats/${encodeURIComponent(id)}`)).json() as { rev: number; session: Session; origin?: ChatOrigin };
+        return { rev: Number(data.rev) || 0, session: data.session, ...(data.origin ? { origin: data.origin } : {}) };
       } catch (e) { if (isTransportError(e) && (e as TransportError).status === 404) return null; throw e; }
     },
     async put(id, text, baseRev) {
@@ -58,11 +58,16 @@ export interface HydrateResult {
   failed: { id: string; error: string; code?: string }[];
   /** Chats that came back from the last-moment copy because the host's version was older. */
   recovered: string[];
+  /** Where each chat was started, as the host recorded it (only chats that have it). */
+  origins: Record<string, ChatOrigin['via']>;
 }
 
 /** By name, so it holds across two copies of this module (a bundle per test file). */
 const isTransportError = (e: unknown): boolean => e instanceof TransportError || (e as { name?: string } | null)?.name === 'TransportError';
 const newer = (a?: string | null, b?: string | null) => String(a ?? '') > String(b ?? '');
+
+/** The host's list as id -> where the chat was started. */
+export const originsOf = (entries: HostChatEntry[]): Record<string, ChatOrigin['via']> => Object.fromEntries(entries.filter(e => e.origin?.via).map(e => [e.id, e.origin!.via]));
 
 /** Read a batch of chats from the host, a few at a time. */
 async function readAll(transport: ChatTransport, entries: HostChatEntry[], parallel = 4): Promise<Map<string, { rev: number; session: Session }>> {
@@ -131,9 +136,9 @@ export async function hydrateChats(opts: {
     const onlyHere = opts.current.filter(s => !hostIds.has(s.id));
     const sessions = [...onlyHere, ...merged];
     const recovered = takeLastMomentCopy(browser, sessions, revs);
-    return { sessions: recovered.sessions, revs, offline: false, moved, failed, recovered: recovered.ids };
+    return { sessions: recovered.sessions, revs, offline: false, moved, failed, recovered: recovered.ids, origins: originsOf(list.chats) };
   } catch (e) {
-    if (isTransportError(e)) return { sessions: opts.current, revs: new Map(), offline: true, moved, failed, recovered: [] };
+    if (isTransportError(e)) return { sessions: opts.current, revs: new Map(), offline: true, moved, failed, recovered: [], origins: {} };
     throw e;
   }
 }

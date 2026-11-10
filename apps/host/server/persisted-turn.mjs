@@ -10,8 +10,9 @@
  *   4. While the turn runs the reply is saved at most every 5 seconds; at the end it is saved once more, finished, and `saved` (final:
  *      true) is the last frame.
  *
- * `stopOnLeave`: the turn stops when the last connection watching it is gone (roleplay and pictures in phase 1). Chat, Code and Vibe turns
- * keep running without a connection; every persisted turn is stopped with /api/chat/stop.
+ * `stopOnLeave`: the turn stops when the last connection watching it is gone. Since phase 2 no kind uses it: Chat, Code, Vibe, roleplay
+ * and pictures keep running without a connection, and every persisted turn is stopped with /api/chat/stop (or /api/rp/stop, /api/images/stop).
+ * Every frame carries `seq`; a client that lost the stream picks it up with `after` (the same request again, or an attach).
  */
 import { randomUUID } from 'node:crypto';
 import { error } from './util.mjs';
@@ -22,6 +23,7 @@ const SAVE_EVERY_MS = 5000;
 export const CONNECTION_LOST = 'The connection was lost, so this reply stopped. What was written so far is kept; ask again for the rest.';
 
 /** An error a prepare step throws: refused before anything started. */
+export const CHAT_DELETED = 'This chat was deleted.';
 export const refusal = (status, message, code) => Object.assign(new Error(message), { status, code });
 
 const NDJSON = { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive' };
@@ -46,11 +48,28 @@ export function createPersistedTurns({ chatStore, ledger, emitChat = () => {}, l
     return { client, write };
   }
 
-  async function join(res, run) {
+  /** A client picks up a turn (running, or ended less than 10 minutes ago): the frames after `after` (all for null), then live ones. */
+  async function join(res, run, after = null) {
     const { client, write } = stream(res);
-    run.subscribe(write, client.signal);
-    await Promise.race([run.ended, new Promise(r => client.signal.addEventListener('abort', r, { once: true }))]);
+    run.subscribe(write, client.signal, after);
+    if (!run.finished) await Promise.race([run.ended, new Promise(r => client.signal.addEventListener('abort', r, { once: true }))]);
     if (!res.writableEnded) res.end();
+  }
+  const afterOf = value => (Number.isInteger(value) && value >= 0 ? value : null);
+
+  /**
+   * Pick up a turn by `turnId` or by a `requestId` it sent (its own, or the agent's): POST /api/chat/attach, /api/rp/attach and
+   * /api/images/attach. Answers false when the turn is not a persisted one (the caller tries the agent's own attach).
+   */
+  async function attach(res, { turnId = null, requestId = null, after = null, chatId = null }) {
+    const known = turnId ? ledger.get(turnId) : requestId ? ledger.byRequest(requestId) : null;
+    if (!known || (chatId && known.chatId !== chatId)) return false;
+    const run = ledger.run(known.turnId);
+    if (run) { await join(res, run, afterOf(after)); return true; }
+    if (known.state === 'running') { error(res, 409, 'That turn is still being written.', { code: 'turn-running' }); return true; }
+    if (known.state === 'refused') { const r = ledger.refusal(known.turnId); error(res, r.status, r.error, { code: r.code }); return true; }
+    await replay(res, known);
+    return true;
   }
 
   /** A finished turn asked again: its reply from the chat, as a short stream. */
@@ -78,7 +97,7 @@ export function createPersistedTurns({ chatStore, ledger, emitChat = () => {}, l
    * One persisted request. `prepare(session)` returns { session, messageIds, replyId? , ...anything execute needs } or throws
    * refusal(...); `recorder(prepared)` builds the reply from frames; `execute({ onFrame, signal, prepared, requestId })` runs the turn.
    */
-  async function handle({ res, body, kind, prepare, recorder, execute, stopOnLeave = true }) {
+  async function handle({ res, body, kind, prepare, recorder, execute, stopOnLeave = false }) {
     const bad = check(body);
     if (bad) return error(res, bad.status, bad.message, { code: bad.code });
     const chatId = body.sessionId, turnId = body.turnId;
@@ -88,8 +107,8 @@ export function createPersistedTurns({ chatStore, ledger, emitChat = () => {}, l
       if (known.chatId !== chatId) return error(res, 409, 'That turnId belongs to another chat.', { code: 'id-taken' });
       const refused = ledger.refusal(turnId);
       if (refused) return error(res, refused.status, refused.error, { code: refused.code });
-      const run = known.state === 'running' ? ledger.run(turnId) : null;
-      if (run) return join(res, run);
+      const run = ledger.run(turnId);
+      if (run) return join(res, run, afterOf(body.after));
       if (known.state === 'running') return error(res, 409, 'That turn is still being written.', { code: 'turn-running' });
       return replay(res, known);
     }
@@ -120,7 +139,11 @@ export function createPersistedTurns({ chatStore, ledger, emitChat = () => {}, l
     run.subscribe(write, client.signal);
 
     const turnAbort = new AbortController();
-    let lost = false, stoppedByPerson = false, sawError = null;
+    let lost = false, stoppedByPerson = false, cancelled = false, sawError = null;
+    // The reply so far, for a client that resumes later than the kept frames reach.
+    let soFar = { content: '', reasoning: '' };
+    run.snapshot = () => soFar;
+    run.requestIds.add(requestId);
     if (stopOnLeave) run.onIdle = () => { lost = true; turnAbort.abort(); };
     stops.set(chatId, { turnId, kind, stopOnLeave, abort: () => { stoppedByPerson = true; turnAbort.abort(); }, ended: run.ended });
 
@@ -128,8 +151,10 @@ export function createPersistedTurns({ chatStore, ledger, emitChat = () => {}, l
     run.push({ type: 'saved', rev, messageIds: prepared.messageIds ?? (replyId ? [replyId] : []), final: false });
 
     let lastRev = rev, timer = null, saving = Promise.resolve();
+    const gone = () => chatStore.wasDeleted?.(chatId) === true;
     const flush = end => {
       saving = saving.then(async () => {
+        if (gone()) return;   // the person deleted the chat: nothing is written back
         const r = await chatStore.update(chatId, s => rec.into(s, { end }), { persisted: rec.replyIds() });
         if (r) { lastRev = r.rev; emitChat(chatId, r.rev); }
       }).catch(e => log(`persisted turn · could not save ${chatId}: ${e.message}`));
@@ -137,6 +162,15 @@ export function createPersistedTurns({ chatStore, ledger, emitChat = () => {}, l
     };
     const onFrame = frame => {
       if (!frame || typeof frame !== 'object') return;
+      // A turn stopped from somewhere else (the desktop's Stop goes to the agent directly) ends with a cancelled done: stopped, not done.
+      if (frame.type === 'done' && (frame.cancelled === true || frame.finishReason === 'aborted')) cancelled = true;
+      if (frame.type === 'delta') soFar = { ...soFar, content: soFar.content + (frame.text ?? '') };
+      else if (frame.type === 'reasoning') soFar = { ...soFar, reasoning: soFar.reasoning + (frame.text ?? '') };
+      else if (frame.type === 'resync') soFar = { content: frame.content ?? '', reasoning: frame.reasoning ?? '' };
+      // Waiting for the person (an approval, a question): the list's badge comes from the `turns` event.
+      if (frame.type === 'status') ledger.waiting(turnId, /^waiting/.test(String(frame.code ?? '')));
+      else if (frame.type === 'agent-question') ledger.waiting(turnId, true);
+      else if (frame.type === 'agent-question-end') ledger.waiting(turnId, false);
       if (frame.type === 'error') sawError = { message: String(frame.message ?? 'The reply failed.'), code: typeof frame.code === 'string' ? frame.code : null };
       run.push(frame);
       rec.apply(frame);
@@ -147,7 +181,16 @@ export function createPersistedTurns({ chatStore, ledger, emitChat = () => {}, l
     catch (e) { if (!turnAbort.signal.aborted && e?.name !== 'AbortError') onFrame({ type: 'error', message: e?.message ?? String(e), ...(e?.code ? { code: e.code } : {}) }); }
     if (timer) { clearTimeout(timer); timer = null; }
 
-    const state = stoppedByPerson ? 'stopped' : lost ? 'stopped' : sawError ? 'error' : 'done';
+    if (gone()) {
+      // Deleted while it ran (delete stops it): the watchers are told, and nothing is saved.
+      await saving;
+      run.push({ type: 'error', message: CHAT_DELETED, code: 'deleted' });
+      ledger.end(turnId, { state: 'stopped', error: CHAT_DELETED, code: 'deleted', rev: null });
+      if (stops.get(chatId)?.turnId === turnId) stops.delete(chatId);
+      if (!res.writableEnded) res.end();
+      return undefined;
+    }
+    const state = stoppedByPerson || lost || cancelled ? 'stopped' : sawError ? 'error' : 'done';
     const end = { state, error: lost ? CONNECTION_LOST : null, code: lost ? 'connection-lost' : null };
     await flush(end);
     if (kind === 'impersonate') ledger.update(turnId, { text: rec.text?.() ?? '' });
@@ -162,6 +205,7 @@ export function createPersistedTurns({ chatStore, ledger, emitChat = () => {}, l
   return {
     check,
     handle,
+    attach,
     /** Stop the chat's persisted turn (an agent turn is stopped by the agent as well): resolves once it has ended, or null when there is none. */
     stop(chatId) {
       const s = stops.get(chatId);

@@ -58,7 +58,10 @@ import { keepStreamAlive } from './stream-beat.mjs';
 import { EventHub, badRequest, error, eventOptions, json, readBody, readRaw, requestUrl, sameSecret, uid } from './util.mjs';
 import { createTurnLedger } from './turn-ledger.mjs';
 import { createPersistedTurns, refusal } from './persisted-turn.mjs';
-import { chatHistory, createChatRecorder, createImageRecorder, photosOf, shortTitle, validMessageId } from './turn-record.mjs';
+import { prepareChatTurn } from './chat-turn.mjs';
+import { originOf } from './origin.mjs';
+import { createUploadKeys } from './upload-keys.mjs';
+import { chatHistory, createChatRecorder, createImageRecorder, photosOf, validMessageId } from './turn-record.mjs';
 import { createUploads } from './chat-uploads.mjs';
 import { createNativeDrops } from './native-drop.mjs';
 import { createVisionProbe, effectiveVision, readsPicturesByDefault } from './vision-probe.mjs';
@@ -576,6 +579,7 @@ try { uploads.sweep(); } catch { /* best effort */ }
 const turnLedger = createTurnLedger({ file: join(chatStore.root, 'turns.json'), changed: turn => hub.send('turns', turn) });
 chatStore.setLive((chatId, messageId) => turnLedger.isLive(chatId, messageId));
 chatStore.setOnRemove(chatId => uploads.dropChat(chatId));
+const uploadKeys = createUploadKeys();
 const persisted = createPersistedTurns({ chatStore, ledger: turnLedger, emitChat: (id, rev) => hub.send('chats', { id, rev, from: null }), log: line => console.log(line) });
 // A turn that was running when the host stopped: its reply is closed, so it never shows "writing" for ever.
 for (const t of turnLedger.interrupted()) {
@@ -587,39 +591,12 @@ for (const t of turnLedger.interrupted()) {
     () => turnLedger.end(t.turnId, { state: 'error', error: text, code: 'interrupted' }));
 }
 /** What this host supports for the phone (09 part 0, RESPONSE5.md item 1). A missing name is not supported. */
-const CAPABILITIES = { turnPersistence: 1, idempotentSend: 1, turnLedger: 1, historyFromChat: 1, rewind: 1, earlyStream: 1, chatMerge: 1, chatPatchTop: 1, chatMedia: 1, controlRepeat: 1, eventTopics: 1 };
+const CAPABILITIES = { turnPersistence: 1, idempotentSend: 1, turnLedger: 1, historyFromChat: 1, rewind: 1, earlyStream: 1, chatMerge: 1, chatPatchTop: 1, chatMedia: 1, controlRepeat: 1, eventTopics: 1, chatOrigin: 1, deletedSince: 1, deleteStopsTurn: 1,
+  // Phase 2 and 3 (docs: Videos/Working/12-PHASE2-3.md).
+  chatMessages: 1, turnResume: 1, detachedRp: 1, detachedImages: 1, turnsList: 1, turnWaiting: 1, eventResume: 1, chatListDelta: 1, chatListFields: 1, chatPaging: 1, uploadKeys: 1, rawImageRef: 1, gzipRequests: 1 };
 /** Approvals and answers already given (chat:call -> what was decided), so the same decision sent again is answered "already" (24 h). */
 const decided = new Map();
 const rememberDecision = (key, value) => { decided.set(key, { value, at: Date.now() }); for (const [k, v] of decided) if (Date.now() - v.at > 24 * 3600_000) decided.delete(k); };
-
-/** A new message, or Ask again (rewindTo, with an optional edit), of a Chat, Code or Vibe chat: the chat as Strata saves it before the turn. */
-function prepareChatTurn(body, s) {
-  const at = new Date().toISOString();
-  const msgs = Array.isArray(s.messages) ? s.messages : [];
-  const replyId = body.replyId;
-  if (!validMessageId(replyId)) throw refusal(400, 'replyId is required.', 'bad-message');
-  if (msgs.some(m => m.id === replyId)) throw refusal(409, 'That reply id is already a message in this chat.', 'id-taken');
-  let kept, asked = null, before, ids = [];
-  if (typeof body.rewindTo === 'string') {
-    const i = msgs.findIndex(m => m.id === body.rewindTo && m.role === 'user');
-    if (i < 0) throw refusal(400, 'rewindTo must name a message of the person in this chat.', 'bad-message');
-    asked = typeof body.edit === 'string' ? { ...msgs[i], content: body.edit } : msgs[i];
-    before = msgs.slice(0, i); kept = [...before, asked];
-  } else if (body.userMessage && typeof body.userMessage === 'object') {
-    const u = body.userMessage;
-    if (!validMessageId(u.id) || u.role !== 'user' || typeof u.content !== 'string') throw refusal(400, 'userMessage needs an id, role "user" and content.', 'bad-message');
-    const i = msgs.findIndex(m => m.id === u.id);
-    asked = i >= 0 ? msgs[i] : { ...u, at: typeof u.at === 'string' ? u.at : at };
-    before = i >= 0 ? msgs.slice(0, i) : msgs; kept = i >= 0 ? msgs.slice(0, i + 1) : [...msgs, asked];
-    ids.push(asked.id);
-  } else if (body.goalAction === 'resume') { before = msgs; kept = msgs; }
-  else throw refusal(400, 'userMessage (a new message) or rewindTo (Ask again) is required.', 'bad-message');
-  const message = asked ? String(asked.content) : '/goal resume';
-  if (asked && !message.trim() && !photosOf(asked).length) throw refusal(400, 'The message is empty.', 'bad-message');
-  const reply = { id: replyId, role: 'assistant', content: '', at, streaming: true };
-  const session = { ...s, defaultTitle: false, title: msgs.length === 0 && asked ? shortTitle(message.trim() || 'Describe this picture.') : s.title, updatedAt: at, messages: [...kept, reply] };
-  return { session, replyId, messageIds: [...ids, replyId], message: message.trim() || (asked && photosOf(asked).length ? 'Describe this picture.' : ''), photos: asked ? photosOf(asked) : [], before };
-}
 
 /** Wake the pinned model, saying so first when it is not ready. Throws with code model-start-failed. */
 async function wakePinned(onFrame) {
@@ -1205,6 +1182,19 @@ async function api(req, res, path, method, url) {
   // --- chats: one file each in the data folder -----------------------------
   // Not held back by a model folder move: saving a chat has nothing to do with the models. A page must name itself (x-strata-client), which
   // a web page from another site cannot do without the browser asking the host first.
+  // Add, change or remove messages of a chat (phase 2): a roleplay edit, delete, hide or swipe choice without sending the whole chat.
+  const messagesRoute = /^\/api\/chats\/([^/]+)\/messages$/.exec(path);
+  if (messagesRoute && method === 'POST') {
+    if (!req.headers['x-strata-client']) return error(res, 403, 'Not allowed.');
+    try {
+      const id = decodeURIComponent(messagesRoute[1]);
+      const body = await readBody(req, 64 * 1024 * 1024);
+      const base = req.headers['x-strata-base-rev'];
+      const saved = await chatStore.messages(id, body, { baseRev: typeof base === 'string' && /^\d+$/.test(base) ? Number(base) : null });
+      if (!saved.unchanged) hub.send('chats', { id, rev: saved.rev, from: typeof req.headers['x-strata-window'] === 'string' ? req.headers['x-strata-window'].slice(0, 64) : null });
+      return json(res, 200, saved);
+    } catch (e) { const f = e?.message === 'Body must be JSON' ? { status: 400, message: 'The request must be JSON.', code: 'bad-json' } : e?.code === 'bad-gzip' ? e : storeFailure(e); return error(res, f.status, f.message, { code: f.code }); }
+  }
   const chatsRoute = /^\/api\/chats(?:\/([^/]+))?$/.exec(path);
   if (chatsRoute) {
     if (!req.headers['x-strata-client']) return error(res, 403, 'Not allowed.');
@@ -1212,16 +1202,36 @@ async function api(req, res, path, method, url) {
     try { id = chatsRoute[1] ? decodeURIComponent(chatsRoute[1]) : null; } catch { return error(res, 400, 'That is not a chat id.', { code: 'bad-id' }); }
     const from = typeof req.headers['x-strata-window'] === 'string' ? req.headers['x-strata-window'].slice(0, 64) : null;
     try {
-      if (!id && method === 'GET') return json(res, 200, chatStore.list());
+      if (!id && method === 'GET') {
+        // ?deletedSince=<ISO>: a device that was away also learns which chats were deleted meanwhile (its copies go).
+        const since = url.searchParams.get('deletedSince');
+        if (since !== null && Number.isNaN(Date.parse(since))) return error(res, 400, 'deletedSince must be a date and time (ISO 8601).', { code: 'bad-date' });
+        // ?since=<cursor>: only what changed (phase 3). Either way each entry says whether a reply is being written or waits for the person.
+        const changes = url.searchParams.get('since');
+        const answer = changes !== null ? chatStore.changes(changes) : chatStore.list({ deletedSince: since === null ? null : new Date(since).toISOString() });
+        const running = turnLedger.running();
+        const working = new Set([...running.map(t => t.chatId), ...agent.runningTurns().map(t => t.chatId)]);
+        const waiting = new Set([...running.filter(t => t.waiting).map(t => t.chatId), ...agent.pendingAll().map(c => c.chatId)]);
+        const mark = e => ({ ...e, working: working.has(e.id), waiting: waiting.has(e.id) });
+        return json(res, 200, changes !== null ? { ...answer, changed: answer.changed.map(mark) } : { ...answer, chats: answer.chats.map(mark) });
+      }
       if (id === 'import' && method === 'POST') {
         const body = JSON.parse((await readRaw(req, 512 * 1024 * 1024)).toString('utf8') || '{}');
-        const result = await chatStore.importMany(body.sessions);
+        const result = await chatStore.importMany(body.sessions, { origin: originOf(req) });
         for (const imported of result.imported) hub.send('chats', { id: imported, rev: chatStore.rev(imported), from });
         return json(res, 200, result);
       }
+      // ?last=50 or ?before=<message id>&limit=50: a long chat in pages (phase 3).
+      if (id && method === 'GET' && (url.searchParams.has('last') || url.searchParams.has('before'))) {
+        const count = name => { const n = Number(url.searchParams.get(name) ?? 50); return Number.isInteger(n) && n > 0 ? Math.min(n, 1000) : 50; };
+        const page = await chatStore.page(id, url.searchParams.has('before') ? { before: url.searchParams.get('before'), limit: count('limit') } : { last: count('last') });
+        if (!page) return chatStore.wasDeleted(id) ? error(res, 404, 'This chat was deleted.', { code: 'deleted' }) : error(res, 404, 'No such chat.', { code: 'not-found' });
+        return json(res, 200, page);
+      }
       if (id && method === 'GET') {
         const text = await chatStore.read(id);
-        if (text === null) return error(res, 404, 'No such chat.', { code: 'not-found' });
+        // A deleted chat is still 404 (what the desktop expects), with its own code, so a device can tell it from one it never had.
+        if (text === null) return chatStore.wasDeleted(id) ? error(res, 404, 'This chat was deleted.', { code: 'deleted' }) : error(res, 404, 'No such chat.', { code: 'not-found' });
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(text), 'cache-control': 'no-store' });
         res.end(text);
         return undefined;
@@ -1230,7 +1240,7 @@ async function api(req, res, path, method, url) {
         const text = (await readRaw(req, 256 * 1024 * 1024)).toString('utf8');
         const base = req.headers['x-strata-base-rev'];
         const returnChat = url.searchParams.get('return') === 'chat';
-        const saved = await chatStore.save(id, text, { baseRev: typeof base === 'string' && /^\d+$/.test(base) ? Number(base) : null, returnChat });
+        const saved = await chatStore.save(id, text, { baseRev: typeof base === 'string' && /^\d+$/.test(base) ? Number(base) : null, returnChat, origin: originOf(req) });
         // A merge that added what the saving device did not have: every window, that one included, is told to reload it.
         hub.send('chats', { id, rev: saved.storedRev ?? saved.rev, from: saved.changed ? null : from });
         return json(res, 200, saved);
@@ -1245,17 +1255,21 @@ async function api(req, res, path, method, url) {
       if (id && method === 'DELETE') {
         const removed = await chatStore.remove(id);
         hub.send('chats', { id, deleted: true, from });
+        // A reply still being written in it stops: Strata's own turn (the iPhone's) and the agent's. Its watchers are told `deleted`.
+        const own = persisted.stop(id);
+        if (agent.isRunning(id)) void agent.stop(id).catch(() => {});
+        if (own) await Promise.race([own, new Promise(r => setTimeout(r, 5000))]);
         return json(res, 200, removed);
       }
     } catch (e) {
-      const failure = e instanceof SyntaxError ? { status: 400, message: 'The request must be JSON.', code: 'bad-json' } : storeFailure(e);
+      const failure = e instanceof SyntaxError ? { status: 400, message: 'The request must be JSON.', code: 'bad-json' } : e?.code === 'bad-gzip' ? e : storeFailure(e);
       return error(res, failure.status, failure.message, { code: failure.code });
     }
     return error(res, 405, 'Method not allowed.');
   }
   if (storageChanging && !['GET', 'OPTIONS'].includes(method)) return error(res, 409, 'Wait for the model folder check to finish.');
   // --- events -------------------------------------------------------------
-  if (path === '/api/events') return hub.add(res, eventOptions(url.searchParams));
+  if (path === '/api/events') return hub.add(res, eventOptions(url.searchParams, req.headers));
   if (path === '/api/capabilities' && method === 'GET') return json(res, 200, { version: appVersion(), features: CAPABILITIES });
   if(path.startsWith('/api/native')){try{
   if(path==='/api/native'&&method==='GET')return json(res,200,await native.refresh(url.searchParams.get('refresh')==='1'));
@@ -2011,11 +2025,11 @@ async function api(req, res, path, method, url) {
     if (!id) return error(res, 400, 'sessionId is required');
     if (agent.isRunning(id)) return error(res, 409, 'This chat is still working. Stop it or wait for it to finish, then choose the folder.');
     if (body.path === null || body.path === '') { chatFolders.clear(id); return json(res, 200, { folder: null }); }
-    try { const folder = chatFolders.set(id, body.path); try { projects.touch(folder.path); } catch { /* the list is a convenience */ } return json(res, 200, { folder }); } catch (e) { return error(res, 400, e.message); }
+    try { const folder = chatFolders.set(id, body.path); try { projects.touch(folder.path, originOf(req)); } catch { /* the list is a convenience */ } return json(res, 200, { folder }); } catch (e) { return error(res, 400, e.message); }
   }
   // Recent projects (projects.mjs): the list, adding and removing one, and its AGENTS.md in the person's editor.
   if (path === '/api/projects' && method === 'GET') return json(res, 200, { projects: projects.list() });
-  if (path === '/api/projects' && method === 'POST') { try { projects.add((await readBody(req)).path); return json(res, 200, { projects: projects.list() }); } catch (e) { return error(res, 400, e.message); } }
+  if (path === '/api/projects' && method === 'POST') { try { projects.add((await readBody(req)).path, originOf(req)); return json(res, 200, { projects: projects.list() }); } catch (e) { return error(res, 400, e.message); } }
   if (path === '/api/projects' && method === 'DELETE') { projects.remove(url.searchParams.get('path') ?? ''); return json(res, 200, { projects: projects.list() }); }
   // The PC's folders, for the iPhone app and a page opened from away (folder-browse.mjs): look inside one, and make a new one.
   if (path === '/api/folders' && method === 'GET') {
@@ -2056,8 +2070,17 @@ async function api(req, res, path, method, url) {
   if (path === '/api/chat/upload' && method === 'POST') {
     const sid = url.searchParams.get('sessionId') ?? '';
     if (!sid) return error(res, 400, 'sessionId is required');
-    try { const body = await readRaw(req); return json(res, 200, { files: uploads.accept(sid, { body, contentType: req.headers['content-type'], name: url.searchParams.get('name') }) }); }
-    catch (e) { return error(res, e.code === 'too-big' ? 413 : 400, e.message); }
+    try {
+      const body = await readRaw(req);
+      // The same bytes sent again with the same key (a retry): the same answer, no second copy.
+      const key = uploadKeys.keyOf(req, body);
+      const known = key ? uploadKeys.get(`upload:${sid}`, key, files => files.every(f => f.kind !== 'image' || uploads.image(f.id))) : null;
+      if (known) return json(res, 200, { files: known, already: true });
+      const files = uploads.accept(sid, { body, contentType: req.headers['content-type'], name: url.searchParams.get('name') });
+      if (key) uploadKeys.set(`upload:${sid}`, key, files);
+      return json(res, 200, { files });
+    }
+    catch (e) { return error(res, e.code === 'too-big' ? 413 : 400, e.message, e.code ? { code: e.code } : {}); }
   }
   const uploadGet = /^\/api\/chat\/upload\/([0-9a-f-]{36})$/.exec(path);
   if (uploadGet && method === 'GET') {
@@ -2224,7 +2247,28 @@ async function api(req, res, path, method, url) {
   if (path === '/api/image-model/load' && method === 'POST') { void imageModel.load().catch(() => {}); return json(res, 200, imageModel.state()); }
   if (path === '/api/image-model/extras' && method === 'GET') return json(res, 200, imageModel.extras());
   if (path === '/api/image-model/lora' && method === 'POST') { try { return json(res, 200, imageModel.saveLora(await readBody(req))); } catch (e) { return error(res, 400, e.message); } }
-  if (path === '/api/images/ref' && method === 'POST') { try { return json(res, 200, { name: imageModel.addRef((await readBody(req, 28 * 1024 * 1024)).data) }); } catch (e) { return error(res, 400, e.message); } }
+  // A picture to edit: JSON {data: base64} as before, or the raw file (content-type image/jpeg, png or webp: a third smaller), with an
+  // optional x-strata-upload-key so a retry gets the same name. HEAD (or GET) /api/images/ref/<sha256> asks whether Strata has it.
+  if (path === '/api/images/ref' && method === 'POST') {
+    try {
+      const raw = /^image\/(jpeg|png|webp)\b/i.test(String(req.headers['content-type'] ?? ''));
+      const bytes = raw ? await readRaw(req, 28 * 1024 * 1024) : null;
+      const data = raw ? bytes : (await readBody(req, 28 * 1024 * 1024)).data;
+      const buf = raw ? bytes : Buffer.from(String(data ?? '').replace(/^data:image\/[\w+.-]+;base64,/, ''), 'base64');
+      const key = uploadKeys.keyOf(req, buf);
+      const known = key ? uploadKeys.get('ref', key, name => !!imageModel.file(name)) : null;
+      if (known) return json(res, 200, { name: known, already: true });
+      const name = imageModel.addRef(buf);
+      if (key) uploadKeys.set('ref', key, name);
+      return json(res, 200, { name });
+    } catch (e) { return error(res, 400, e.message, e.code ? { code: e.code } : {}); }
+  }
+  const refKey = /^\/api\/images\/ref\/([0-9a-fA-F]{64})$/.exec(path);
+  if (refKey && (method === 'HEAD' || method === 'GET')) {
+    const name = uploadKeys.get('ref', refKey[1].toLowerCase(), n => !!imageModel.file(n));
+    if (method === 'HEAD') { res.writeHead(name ? 200 : 404, name ? { 'x-strata-ref-name': name } : {}); res.end(); return undefined; }
+    return name ? json(res, 200, { name }) : error(res, 404, 'Strata does not have that picture.', { code: 'not-found' });
+  }
   if (path === '/api/image-model/touch' && method === 'POST') { imageModel.touch(); return json(res, 200, imageModel.state()); }
   if (path === '/api/image-model/unload' && method === 'POST') { await imageModel.unload('person'); return json(res, 200, imageModel.state()); }
   if (path === '/api/images/generate' && method === 'POST') {
@@ -2369,6 +2413,19 @@ async function api(req, res, path, method, url) {
      of what was said while no page was there, then the live frames, as on /api/chat/stream. A turn that ended while the page was away
      (the page names it by requestId) is sent once, whole. 404 when there is nothing to take over. */
   if (path === '/api/chat/active' && method === 'GET') return json(res, 200, { turns: agent.runningTurns() });
+  // The persisted turns running now, every kind (the iPhone's working and waiting badges after a reconnect).
+  if (path === '/api/chat/turns' && method === 'GET') return json(res, 200, { turns: turnLedger.running(url.searchParams.get('chatId') || null) });
+  // Explicit Stop for a roleplay reply or a picture Strata is writing (closing the connection no longer stops them).
+  if ((path === '/api/rp/stop' || path === '/api/images/stop') && method === 'POST') {
+    const b = await readBody(req);
+    const known = typeof b.turnId === 'string' ? turnLedger.get(b.turnId) : typeof b.requestId === 'string' ? turnLedger.byRequest(b.requestId) : null;
+    const chatId = typeof b.sessionId === 'string' ? b.sessionId : known?.chatId;
+    if (!chatId) return error(res, 400, 'sessionId, turnId or requestId is required', { code: 'bad-message' });
+    const own = persisted.stop(chatId);
+    if (own) return json(res, 200, await own);
+    const last = turnLedger.lastFor(chatId);
+    return json(res, 200, { stopped: false, ...(last ? { already: true, state: last.state, turnId: last.turnId } : {}) });
+  }
   // What happened to one press of a button (RESPONSE5.md item 4): unknown means Strata never got it, so it is safe to send again.
   if (path === '/api/chat/turn' && method === 'GET') {
     const turnId = url.searchParams.get('turnId') ?? '';
@@ -2376,8 +2433,13 @@ async function api(req, res, path, method, url) {
     if (!known || (url.searchParams.get('chatId') && known.chatId !== url.searchParams.get('chatId'))) return json(res, 200, { state: 'unknown', turnId });
     return json(res, 200, { ...known, state: known.state === 'refused' ? 'error' : known.state });
   }
-  if (path === '/api/chat/attach' && method === 'POST') {
+  // Pick up a persisted turn (any kind) by turnId or requestId, from the frame after `after` (phase 2). /api/rp/attach and
+  // /api/images/attach are the same request.
+  if ((path === '/api/chat/attach' || path === '/api/rp/attach' || path === '/api/images/attach') && method === 'POST') {
     const b = await readBody(req);
+    const ids = { turnId: typeof b.turnId === 'string' ? b.turnId : null, requestId: typeof b.requestId === 'string' ? b.requestId : null, after: b.after, chatId: typeof b.sessionId === 'string' ? b.sessionId : null };
+    if ((ids.turnId || ids.requestId) && await persisted.attach(res, ids)) return undefined;
+    if (path !== '/api/chat/attach') return error(res, 404, 'There is no turn to take over.', { code: 'no-turn' });
     if (typeof b.sessionId !== 'string' || !b.sessionId) return error(res, 400, 'sessionId is required');
     const controller = new AbortController();
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });

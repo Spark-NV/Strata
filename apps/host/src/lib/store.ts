@@ -27,8 +27,8 @@ import { noModelNotice } from './no-model';
 import { taskHandoverMessage, taskHandoverTitle, chatHandoverMessage, chatHandoverTitle } from './task-handover';
 import type { Task } from './tasks';
 import { postWithFolderFallback } from './folder-pick';
-import { createSessionWriter, exportSessions, readBrowserSessions, HOST_FLAG_KEY, PENDING_KEY, type SaveResult, type StorageLike } from './session-persist';
-import { createHttpTransport, hydrateChats, keepLastMomentCopy, WINDOW_ID } from './chat-sync';
+import { createSessionWriter, exportSessions, readBrowserSessions, HOST_FLAG_KEY, PENDING_KEY, type ChatOrigin, type SaveResult, type StorageLike } from './session-persist';
+import { createHttpTransport, hydrateChats, keepLastMomentCopy, originsOf, WINDOW_ID } from './chat-sync';
 import { copyText } from './clipboard';
 import { setTranslationLanguage, tr, validLanguage, type Language } from './i18n';
 /**
@@ -143,6 +143,8 @@ export interface AppState {
   /** First run, and "run setup again", both present the wizard as a modal. */
   setupOpen: boolean;
   sessions: Session[];
+  /** Where the host says each chat was started (the iPhone app, the web page from away); shown as a tag in the chat list. */
+  chatOrigins: Record<string, ChatOrigin['via']>;
   activeSession: string | null;
   streaming: boolean;
   /** Messages the person sent while an answer was being written, waiting to go when it ends (Send after, Interrupt), by chat (#4783). */
@@ -351,6 +353,7 @@ let state: AppState = {
   activeWorkspace: null,
   setupOpen: false,
   sessions: loadSessions(),
+  chatOrigins: {},
   sessionSave: null,
   activeSession: null,
   streaming: false,
@@ -1393,7 +1396,7 @@ export async function loadChatsFromHost() {
   chatsRead = true;
   const sessions = result.sessions.map(fixSession);
   for (const s of sessions) { const rev = result.revs.get(s.id); if (rev !== undefined && !result.recovered.includes(s.id)) sessionWriter.adopt(s, rev); }
-  set({ sessions });
+  set({ sessions, chatOrigins: result.origins });
   // Whatever the host does not have yet (a chat it refused during the move, a last-moment copy) is sent now; a refusal raises the notice.
   sessionWriter.schedule(sessions);
   sessionWriter.enable();
@@ -1417,6 +1420,7 @@ export async function applyChatChange(id: string, rev: number | null, deleted: b
   const fresh = state.sessions.find(s => s.id === id);
   if (fresh && (liveTurns.has(id) || sessionWriter.dirty(fresh))) return;
   sessionWriter.adopt(got.session, got.rev);
+  if (got.origin && state.chatOrigins[id] !== got.origin.via) set({ chatOrigins: { ...state.chatOrigins, [id]: got.origin.via } });
   const next = fresh ? state.sessions.map(s => (s.id === id ? got.session : s)) : [...state.sessions, got.session].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   set({ sessions: next });
 }
@@ -1426,6 +1430,7 @@ async function syncChatsFromHost() {
   const list = await chatTransport.list().catch(() => null);
   if (!list) return;
   const onHost = new Set(list.chats.map(c => c.id));
+  set({ chatOrigins: originsOf(list.chats) });
   for (const entry of list.chats) await applyChatChange(entry.id, entry.rev, false);
   for (const s of state.sessions) if (!onHost.has(s.id) && sessionWriter.rev(s.id) > 0) await applyChatChange(s.id, null, true);
   sessionWriter.enable();
