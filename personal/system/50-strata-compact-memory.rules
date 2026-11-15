@@ -1,0 +1,9 @@
+// Lets spark start strata-compact-memory.service without a password (qwen-orca-iq4xs.service runs it before the engine).
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "strata-compact-memory.service" &&
+        action.lookup("verb") == "start" &&
+        subject.user == "spark") {
+        return polkit.Result.YES;
+    }
+});

@@ -7,6 +7,9 @@ patch at level 1 (`/home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ
 app pins it) and starts this profile. Against the older profile below it reads the n-gram table with direct SSD reads,
 uses `STRATA_AVX512_EXPERTS=1`, a 1152 MiB VRAM reserve, its own learned expert profile, Qwen's official BF16 token
 embedding, and since round 2 the expert RAM on 2 MiB pages where free (`STRATA_PIN_GUARD=2`, `STRATA_COMPLEMENT_THP=2`).
+Before each start, `qwen-orca-iq4xs.service` runs the root step in [system/](system/) (`ExecStartPre`), which frees the page cache
+and compacts RAM, so all of the expert RAM gets 2 MiB pages (about 50 GiB instead of about 30). Install it once with
+`sudo sh personal/system/install.sh`; the undo steps are in that file. Measured: decode 140.3 vs 140.2 tok/s, within the spread.
 Measurements and what was tried:
 [`bench/results/2026-11-15-spark-5090-unsloth-v31`](../bench/results/2026-11-15-spark-5090-unsloth-v31/README.md).
 To go back, point the unit's `--config` at `rtx5090-orca-iq4xs.json`; the engines from before are

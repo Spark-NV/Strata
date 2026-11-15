@@ -90,3 +90,4 @@ Quality (`qq-compare.txt` method, against the old reference): level 1 perplexity
 | `STRATA_GRAPH_PRIO=1` | 139.8 vs 140.5 |
 | `STRATA_DEQUANT_SIDE=1` (prompt) | 13K / 52K tokens: 5,897 / 7,032 vs 5,851 / 7,031 tok/s |
 | `STRATA_PF_FUSED_NT=256 STRATA_PF_BATCH=256` (prompt) | 5,758 / 6,943 vs 5,793 / 6,973 |
+| All of the expert RAM on 2 MiB pages (root: `sync; echo 3 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory` before the start, `runc.sh`, `tc.out`) | 48.1-50.1 GiB of huge pages instead of about 30. Mixed 137.0 / 140.3 / 143.5 against 140.0 / 140.4 with 4 KiB pages (`STRATA_COMPLEMENT_THP=0`), interleaved on the same compacted RAM; CPU gate/up 1.97-2.32 vs 2.20-2.37 ms. No decode gain beyond the spread; kept anyway at Spark's choice, since it costs nothing (start 46 s, unchanged): `personal/system/` runs it before every start. |

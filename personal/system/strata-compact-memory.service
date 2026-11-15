@@ -1,0 +1,6 @@
+[Unit]
+Description=Free and compact RAM before Strata starts (2 MiB pages for the experts in RAM)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/strata-compact-memory.sh
