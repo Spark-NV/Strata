@@ -2469,7 +2469,7 @@ static bool pcie_auto_split_ok() {
 // PCIe 4 link, so the probe takes no longer than the one 1 GiB burst did.  `samples`, when given, gets every
 // burst's reading for the log.
 double g_last_h2d_gbps = -1.0;   // the last probe's reading, for the prompt planner (#2824)
-double probe_pcie_h2d_gbps(std::string* samples = nullptr) {
+double probe_pcie_h2d_round(std::string* samples) {
     constexpr size_t kBytes = 256ull << 20;
     constexpr int kBursts = 4;
     void* h = nullptr;
@@ -2526,6 +2526,29 @@ double probe_pcie_h2d_gbps(std::string* samples = nullptr) {
     cudaFreeHost(h);
     if (bw > 0.0) g_last_h2d_gbps = bw;
     return bw;
+}
+
+// The link of an idle card sits at a low PCIe speed and is raised only after some traffic: an RTX 5090 (PCIe 5 x16)
+// read 7.3 GB/s in all four bursts in about a third of the starts on one PC (the next burst would have read 57),
+// and that start kept a PCIe share of 0.10 instead of 0.55 for the whole session.  So a round that stays under
+// 20 GB/s is followed by more rounds (up to ~1 s of copies), and the best reading of them all counts.  A link that
+// really is slow reads the same in every round and costs only that second.  STRATA_PCIE_PROBE_ROUNDS=1 keeps one round.
+double probe_pcie_h2d_gbps(std::string* samples = nullptr) {
+    static const int rounds = [] { const char* v = std::getenv("STRATA_PCIE_PROBE_ROUNDS"); return v != nullptr && std::atoi(v) > 0 ? std::atoi(v) : 8; }();
+    double best = -1.0;
+    std::string all;
+    for (int r = 0; r < rounds; ++r) {
+        std::string one;
+        const double bw = probe_pcie_h2d_round(&one);
+        if (bw <= 0.0) break;
+        if (!all.empty()) all += " |";
+        all += (all.empty() ? "" : " ") + one;
+        best = std::max(best, bw);
+        if (best >= 20.0) break;
+    }
+    if (best > 0.0) g_last_h2d_gbps = best;
+    if (samples != nullptr) *samples = all;
+    return best;
 }
 
 // The PCIe share of the missed experts for a link measured at `gbps`: `base` (the share measured on x16 links) from

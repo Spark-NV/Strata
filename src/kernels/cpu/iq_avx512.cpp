@@ -236,6 +236,127 @@ template <> struct Fmt<18> {   // IQ3_XXS: d, qs[64] grid bytes, 8 x u32 (4 x 7-
     }
 };
 
+// IQ3_XXS with the grid looked up by AVX-512 VBMI byte permutes instead of 16 scalar loads per 64 values (Zen 4, where
+// a vpgatherdd is microcoded and the scalar path is bound by the loads and inserts).  Every iq3xxs_grid entry is four
+// bytes from the eight values {4,12,...,62}, so an entry is four 3-bit codes: lo byte = codes 0 and 1, hi byte = codes 2
+// and 3 (one per nibble).  Per block: the 64 indices -> lo / hi code bytes with vpermi2b over 256-byte tables; per
+// chunk: the codes spread to their four output bytes, the nibble picked, and the value read with vpermb.  The bytes are
+// the scalar path's (iq3vb_ok() checks every entry at start), so the sums and every rounding are unchanged.
+struct Iq3Vb {
+    alignas(64) uint8_t lo[256];
+    alignas(64) uint8_t hi[256];
+    alignas(64) uint8_t vt[64];
+    bool ok = false;
+};
+inline const Iq3Vb& iq3vb() {
+    static const Iq3Vb t = [] {
+        Iq3Vb r;
+        static const uint8_t vals[8] = {4, 12, 20, 28, 36, 44, 52, 62};
+        for (int i = 0; i < 64; ++i) r.vt[i] = vals[i & 7];
+        bool ok = true;
+        for (int e = 0; e < 256; ++e) {
+            int c[4];
+            for (int k = 0; k < 4; ++k) {
+                const uint8_t v = (uint8_t) (iq3xxs_grid[e] >> (8 * k));
+                c[k] = -1;
+                for (int s = 0; s < 8; ++s) if (vals[s] == v) c[k] = s;
+                if (c[k] < 0) { ok = false; c[k] = 0; }
+            }
+            r.lo[e] = (uint8_t) (c[0] | c[1] << 4);
+            r.hi[e] = (uint8_t) (c[2] | c[3] << 4);
+        }
+        r.ok = ok;
+        return r;
+    }();
+    return t;
+}
+// The tables in registers for a row's loop (9 zmm), and one block's code bytes.
+struct Iq3VbRegs {
+    __m512i lo0, lo1, lo2, lo3, hi0, hi1, hi2, hi3, vt;
+    STRATA_FORCEINLINE Iq3VbRegs() {
+        const Iq3Vb& T = iq3vb();
+        lo0 = _mm512_load_si512((const void*) T.lo); lo1 = _mm512_load_si512((const void*) (T.lo + 64));
+        lo2 = _mm512_load_si512((const void*) (T.lo + 128)); lo3 = _mm512_load_si512((const void*) (T.lo + 192));
+        hi0 = _mm512_load_si512((const void*) T.hi); hi1 = _mm512_load_si512((const void*) (T.hi + 64));
+        hi2 = _mm512_load_si512((const void*) (T.hi + 128)); hi3 = _mm512_load_si512((const void*) (T.hi + 192));
+        vt = _mm512_load_si512((const void*) T.vt);
+    }
+    // the block's 64 grid indices -> their lo / hi code bytes
+    STRATA_FORCEINLINE void codes(const uint8_t* b, __m512i& lo, __m512i& hi) const {
+        const __m512i q = _mm512_loadu_si512((const void*) (b + 2));
+        const __mmask64 h = _mm512_movepi8_mask(q);
+        lo = _mm512_mask_blend_epi8(h, _mm512_permutex2var_epi8(lo0, q, lo1), _mm512_permutex2var_epi8(lo2, q, lo3));
+        hi = _mm512_mask_blend_epi8(h, _mm512_permutex2var_epi8(hi0, q, hi1), _mm512_permutex2var_epi8(hi2, q, hi3));
+    }
+    // the block's four 64-bit sign masks (chunk j: bytes 8 j .. 8 j + 7), each byte the 7-bit index with its parity as
+    // bit 7, as sign_mask_from_idx makes them: vpmultishiftqb takes the indices at bits 0,7,14,21 of each u32
+    STRATA_FORCEINLINE void signs4(const uint8_t* b, uint64_t m[4]) const {
+        const __m256i w = _mm256_loadu_si256((const __m256i*) (b + 2 + 64));
+        const __m256i ctl = _mm256_set1_epi64x(0x352E2720150E0700ll);   // bit offsets 0,7,14,21 (a), 32,39,46,53 (c)
+        __m256i s = _mm256_and_si256(_mm256_multishift_epi64_epi8(ctl, w), _mm256_set1_epi8(0x7F));
+        const __m256i ptab = _mm256_setr_epi8(0, -128, -128, 0, -128, 0, 0, -128, -128, 0, 0, -128, 0, -128, -128, 0,
+                                              0, -128, -128, 0, -128, 0, 0, -128, -128, 0, 0, -128, 0, -128, -128, 0);
+        const __m256i nib = _mm256_set1_epi8(0x0F);
+        const __m256i par = _mm256_xor_si256(_mm256_shuffle_epi8(ptab, _mm256_and_si256(s, nib)),
+                                             _mm256_shuffle_epi8(ptab, _mm256_and_si256(_mm256_srli_epi16(s, 4), nib)));
+        s = _mm256_or_si256(s, par);
+        _mm256_storeu_si256((__m256i*) m, s);
+    }
+    // chunk j's 64 grid bytes: output byte i <- index 16 j + i / 4, code i % 4
+    STRATA_FORCEINLINE __m512i chunk(__m512i lo, __m512i hi, int j) const {
+        const __m512i sp = _mm512_add_epi8(_mm512_set_epi8(15, 15, 15, 15, 14, 14, 14, 14, 13, 13, 13, 13, 12, 12, 12, 12, 11, 11, 11, 11, 10,
+                                                           10, 10, 10, 9, 9, 9, 9, 8, 8, 8, 8, 7, 7, 7, 7, 6, 6, 6, 6, 5, 5, 5, 5, 4, 4,
+                                                           4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0),
+                                           _mm512_set1_epi8((char) (16 * j)));
+        __m512i t = _mm512_mask_blend_epi8(_cvtu64_mask64(0xCCCCCCCCCCCCCCCCull), _mm512_permutexvar_epi8(sp, lo),
+                                           _mm512_permutexvar_epi8(sp, hi));
+        t = _mm512_mask_blend_epi8(_cvtu64_mask64(0xAAAAAAAAAAAAAAAAull), t, _mm512_srli_epi16(t, 4));
+        return _mm512_permutexvar_epi8(t, vt);
+    }
+};
+template <> struct Fmt<118> {   // IQ3_XXS, VBMI grid decode (same bytes as Fmt<18>); rows go through row_*_vb below
+    static constexpr int bytes = 98;
+    static constexpr float K = 0.25f;
+    static STRATA_FORCEINLINE __m512i scales(const uint8_t* b, int j) {
+        const uint32_t a = u32(b + 2 + 64 + 8 * j), c = u32(b + 2 + 64 + 8 * j + 4);
+        const int sa = 2 * (int) (a >> 28) + 1, sb = 2 * (int) (c >> 28) + 1;
+        return scales4(sa, sa, sb, sb);
+    }
+    static STRATA_FORCEINLINE void signs(const uint8_t* b, int j, __mmask64& m, __m512i& sc) {
+        const uint32_t a = u32(b + 2 + 64 + 8 * j), c = u32(b + 2 + 64 + 8 * j + 4);
+        m = sign_mask_from_idx(sign_idx_xxs(a, c));
+        const int sa = 2 * (int) (a >> 28) + 1, sb = 2 * (int) (c >> 28) + 1;
+        sc = scales4(sa, sa, sb, sb);
+    }
+    template <bool GATHER = true>
+    static STRATA_FORCEINLINE void decode(const uint8_t* b, int j, __m512i& g, __mmask64& m, __m512i& sc) {
+        const Iq3VbRegs R;
+        __m512i lo, hi;
+        R.codes(b, lo, hi);
+        g = R.chunk(lo, hi, j);
+        signs(b, j, m, sc);
+    }
+};
+STRATA_FORCEINLINE bool cpu_vbmi() noexcept {
+    static const bool v = [] {
+#if defined(_MSC_VER)
+        int r[4];
+        __cpuidex(r, 7, 0);
+        return ((unsigned) r[2] & 2u) != 0;
+#else
+        unsigned a, b, c, d;
+        if (!__get_cpuid_count(7, 0, &a, &b, &c, &d)) return false;
+        return (c & 2u) != 0;
+#endif
+    }();
+    return v;
+}
+// STRATA_NO_IQ3_VBMI=1 keeps the scalar-load decode
+inline bool iq3vb_on() noexcept {
+    static const bool v = std::getenv("STRATA_NO_IQ3_VBMI") == nullptr && cpu_vbmi() && iq3vb().ok;
+    return v;
+}
+
 template <> struct Fmt<21> {   // IQ3_S: d, qs[64], qh[8], signs[32], scales[4]
     static constexpr int bytes = 110;
     static constexpr float K = 1.0f;
@@ -312,6 +433,7 @@ STRATA_FORCEINLINE void row_gu_dot(const uint8_t* gr, const uint8_t* ur, int nbl
     }
     const __m512i zero = _mm512_setzero_si512();
     const int pref = prefetch_distance();
+    [[maybe_unused]] const Iq3VbRegs vb;
     for (int i = 0; i < nblocks; ++i) {
         const uint8_t* gblk = gr + (size_t) i * Fmt<TY>::bytes;
         const uint8_t* ublk = ur + (size_t) i * Fmt<TY>::bytes;
@@ -326,11 +448,19 @@ STRATA_FORCEINLINE void row_gu_dot(const uint8_t* gr, const uint8_t* ur, int nbl
             acci_g[t] = zero;
             acci_u[t] = zero;
         }
+        [[maybe_unused]] __m512i glo, ghi, ulo, uhi;
+        [[maybe_unused]] uint64_t gms[4], ums[4];
+        if constexpr (TY == 118) { vb.codes(gblk, glo, ghi); vb.codes(ublk, ulo, uhi); vb.signs4(gblk, gms); vb.signs4(ublk, ums); }
         for (int j = 0; j < 4; ++j) {
             __m512i gg, gsc, ug, usc;
             __mmask64 gm, um;
-            Fmt<TY>::template decode<GATHER>(gblk, j, gg, gm, gsc);
-            Fmt<TY>::template decode<GATHER>(ublk, j, ug, um, usc);
+            if constexpr (TY == 118) {
+                gg = vb.chunk(glo, ghi, j); gm = _cvtu64_mask64(gms[j]); gsc = Fmt<118>::scales(gblk, j);
+                ug = vb.chunk(ulo, uhi, j); um = _cvtu64_mask64(ums[j]); usc = Fmt<118>::scales(ublk, j);
+            } else {
+                Fmt<TY>::template decode<GATHER>(gblk, j, gg, gm, gsc);
+                Fmt<TY>::template decode<GATHER>(ublk, j, ug, um, usc);
+            }
             for (int t = 0; t < NT; ++t) {
                 const __m512i yv = _mm512_loadu_si512((const void*) (y[t][i].qs + 64 * j));
                 const __m512i ysg = _mm512_mask_sub_epi8(yv, gm, zero, yv);
@@ -359,6 +489,7 @@ STRATA_FORCEINLINE void row_dot(const uint8_t* row, int nblocks, const block_q8_
     for (int t = 0; t < NT; ++t) accf[t] = _mm256_setzero_ps();
     const __m512i zero = _mm512_setzero_si512();
     const int pref = prefetch_distance();
+    [[maybe_unused]] const Iq3VbRegs vb;
     for (int i = 0; i < nblocks; ++i) {
         const uint8_t* blk = row + (size_t) i * Fmt<TY>::bytes;
         if (pref > 0) {
@@ -367,10 +498,14 @@ STRATA_FORCEINLINE void row_dot(const uint8_t* row, int nblocks, const block_q8_
         }
         __m512i acci[NT];
         for (int t = 0; t < NT; ++t) acci[t] = zero;
+        [[maybe_unused]] __m512i blo, bhi;
+        [[maybe_unused]] uint64_t bms[4];
+        if constexpr (TY == 118) { vb.codes(blk, blo, bhi); vb.signs4(blk, bms); }
         for (int j = 0; j < 4; ++j) {
             __m512i g, sc;
             __mmask64 m;
-            Fmt<TY>::template decode<GATHER>(blk, j, g, m, sc);
+            if constexpr (TY == 118) { g = vb.chunk(blo, bhi, j); m = _cvtu64_mask64(bms[j]); sc = Fmt<118>::scales(blk, j); }
+            else Fmt<TY>::template decode<GATHER>(blk, j, g, m, sc);
             for (int t = 0; t < NT; ++t) {
                 const __m512i yv = _mm512_loadu_si512((const void*) (y[t][i].qs + 64 * j));
                 const __m512i ys = _mm512_mask_sub_epi8(yv, m, zero, yv);
@@ -427,7 +562,10 @@ template <int TY, bool Singleton = false>
 void gu_rows_nt(int nt, const uint8_t* blob, size_t gu_row, size_t up_off, int n, const void* const* act,
                 float* const* ff, int r0, int r1) {
     if (gather_for_type<TY>()) gu_rows_nt_g<TY, Singleton, true>(nt, blob, gu_row, up_off, n, act, ff, r0, r1);
-    else gu_rows_nt_g<TY, Singleton, false>(nt, blob, gu_row, up_off, n, act, ff, r0, r1);
+    else if constexpr (TY == 18) {
+        if (iq3vb_on()) gu_rows_nt_g<118, Singleton, false>(nt, blob, gu_row, up_off, n, act, ff, r0, r1);
+        else gu_rows_nt_g<TY, Singleton, false>(nt, blob, gu_row, up_off, n, act, ff, r0, r1);
+    } else gu_rows_nt_g<TY, Singleton, false>(nt, blob, gu_row, up_off, n, act, ff, r0, r1);
 }
 
 template <int TY, bool GATHER = true>
@@ -449,7 +587,10 @@ template <int TY>
 void dot_rows_nt(int nt, const uint8_t* w, size_t row_bytes, int n, const void* const* act, float* const* out, int r0,
                  int r1) {
     if (gather_for_type<TY>()) dot_rows_nt_g<TY, true>(nt, w, row_bytes, n, act, out, r0, r1);
-    else dot_rows_nt_g<TY, false>(nt, w, row_bytes, n, act, out, r0, r1);
+    else if constexpr (TY == 18) {
+        if (iq3vb_on()) dot_rows_nt_g<118, false>(nt, w, row_bytes, n, act, out, r0, r1);
+        else dot_rows_nt_g<TY, false>(nt, w, row_bytes, n, act, out, r0, r1);
+    } else dot_rows_nt_g<TY, false>(nt, w, row_bytes, n, act, out, r0, r1);
 }
 
 

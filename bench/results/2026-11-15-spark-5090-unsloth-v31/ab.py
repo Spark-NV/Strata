@@ -21,6 +21,15 @@ if novis: c.pop("vision",None); args.remove("--vision")
 c["env"]={**c.get("env",{}), "STRATA_DECODE_TIMING":"1", **kv}
 cfg=f"{SP}/ab-{name}.json"; json.dump(c,open(cfg,"w"),indent=1)
 if os.path.exists(log): os.remove(log)
+import socket
+_s=socket.socket()
+if _s.connect_ex(("127.0.0.1",8090))==0: print("port 8090 is taken: a server from another run is still up"); sys.exit(1)
+_s.close()
+for _ in range(120):   # the previous arm's engine may still be giving back its VRAM
+    try:
+        if int(subprocess.check_output(["nvidia-smi","--query-gpu=memory.used","--format=csv,noheader,nounits"]).decode().split()[0]) < 3000: break
+    except Exception: break
+    time.sleep(1)
 p=subprocess.Popen([f"{ROOT}/.venv/bin/python","-m","serve.server","--engine","strata","--config",cfg,"--port","8090"],cwd=ROOT,stdout=open(f"{SP}/ab-{name}.out","w"),stderr=subprocess.STDOUT)
 t=time.time()
 while True:

@@ -3868,7 +3868,28 @@ bool FileExpertSource::pin_cache_complement(
 #if !defined(_WIN32)
                 void* aligned = nullptr;
                 const uint64_t page = 4096;
-                if (posix_memalign(&aligned, (size_t) page, (size_t) ((bytes + page - 1) / page * page)) == 0) arena = aligned;
+#if defined(__linux__)
+                // STRATA_COMPLEMENT_THP=1 (opt-in, with STRATA_PIN_GUARD=2): the arena 2 MiB-aligned and asked for
+                // transparent huge pages before the steps fault it in, then registered as before.  cudaHostAlloc's own
+                // pages are 4 KiB, so every ~2.4 MB expert the CPU pool streams costs ~600 TLB misses; with 2 MiB pages
+                // about two.  Only the page size changes, not a byte of the data.
+                // =2: aligned only, no MADV_HUGEPAGE: under THP "always" the faults take a huge page wherever a free 2 MiB
+                // block is at hand and never stall in compaction (=1 made a 48 GiB start take 42 s to 290 s as the RAM
+                // fragmented over a day of restarts)
+                static const int thp = [] { const char* v = std::getenv("STRATA_COMPLEMENT_THP"); return v != nullptr && (v[0] == '1' || v[0] == '2') ? v[0] - '0' : 0; }();
+                const uint64_t align = thp && !numa.place ? (2ull << 20) : page;
+#else
+                const uint64_t align = page;
+#endif
+                if (posix_memalign(&aligned, (size_t) align, (size_t) ((bytes + align - 1) / align * align)) == 0) arena = aligned;
+#if defined(__linux__)
+                if (arena != nullptr && align > page && thp == 1) {
+                    if (madvise(arena, (size_t) ((bytes + align - 1) / align * align), MADV_HUGEPAGE) != 0)
+                        std::fprintf(stderr, "FileExpertSource: WARNING: madvise(MADV_HUGEPAGE) on the complement failed (errno %d)\n", errno);
+                    else
+                        std::fprintf(stderr, "FileExpertSource: STRATA_COMPLEMENT_THP: the complement asks for 2 MiB pages\n");
+                }
+#endif
 #endif
 #if defined(__linux__)
                 // STRATA_NUMA_SPLIT: a 2 MiB huge page would put several slices on its toucher's node, so the arena
@@ -3933,6 +3954,42 @@ bool FileExpertSource::pin_cache_complement(
                             for (uint64_t at = got; at < got + step; at += kPage) ((volatile uint8_t*) arena)[at] = 0;
                         got += step;
                     }
+#if defined(__linux__)
+                    // STRATA_COMPLEMENT_THP: the faults above take a huge page only where a free 2 MiB block was at
+                    // hand (about half of 48 GiB on a box whose RAM was full of file cache).  MADV_COLLAPSE (Linux 6.1)
+                    // makes the rest now, compacting as it needs to, before the registration pins the pages for good.
+                    if (got > 0 && ((uintptr_t) arena & ((2ull << 20) - 1)) == 0 && std::getenv("STRATA_COMPLEMENT_THP") != nullptr &&
+                        (std::getenv("STRATA_COMPLEMENT_THP")[0] == '1' || std::getenv("STRATA_COMPLEMENT_THP")[0] == '2')) {
+                        auto anon_huge_kb = [] {
+                            long long kb = -1;
+                            if (std::FILE* f = std::fopen("/proc/self/smaps_rollup", "r")) {
+                                char line[256];
+                                while (std::fgets(line, sizeof line, f) != nullptr)
+                                    if (std::sscanf(line, "AnonHugePages: %lld kB", &kb) == 1) break;
+                                std::fclose(f);
+                            }
+                            return kb;
+                        };
+                        const long long before_kb = anon_huge_kb();
+                        const auto c0 = std::chrono::steady_clock::now();
+                        // MADV_COLLAPSE (STRATA_COMPLEMENT_COLLAPSE=1, opt-in): measured to fail fast here (no free blocks to build from)
+                        static const bool collapse = [] { const char* v = std::getenv("STRATA_COMPLEMENT_COLLAPSE"); return v != nullptr && v[0] == '1'; }();
+#ifndef MADV_COLLAPSE
+#define MADV_COLLAPSE 25
+#endif
+                        int rc = 0;
+                        if (collapse) {
+                            // in 1 GiB pieces: one failed piece (no block to be had) does not stop the rest
+                            const uint64_t span = got & ~((2ull << 20) - 1);
+                            for (uint64_t at = 0; at < span; at += 1ull << 30)
+                                if (madvise((uint8_t*) arena + at, (size_t) std::min<uint64_t>(1ull << 30, span - at), MADV_COLLAPSE) != 0) ++rc;
+                        }
+                        std::fprintf(stderr, "FileExpertSource: STRATA_COMPLEMENT_THP: %.2f GiB of huge pages in the process after the faults, "
+                                             "%.2f GiB after MADV_COLLAPSE (%.1f s, %d of the 1 GiB pieces not whole)\n",
+                                     before_kb / 1048576.0, anon_huge_kb() / 1048576.0,
+                                     std::chrono::duration<double>(std::chrono::steady_clock::now() - c0).count(), rc);
+                    }
+#endif
                     // cut at an expert boundary: a blob that runs past the registered range would be refused by a
                     // cudaMemcpyAsync as not page-locked
                     uint64_t w = got;

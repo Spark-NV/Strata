@@ -1,13 +1,16 @@
 # RTX 5090 profiles
 
-**Live since 2026-11-15:** `rtx5090-unsloth-v31-iq4xs.json`, Unsloth's V3.1 UD-IQ4_XS
-(`/home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS.gguf`, pack `packs/unsloth-v31-iq4_xs`). The service
-`qwen-orca-iq4xs.service` keeps its name (the app pins it) and now starts this profile. Against the older profile below it
-reads the n-gram table with direct SSD reads, uses `STRATA_AVX512_EXPERTS=1`, a 1152 MiB VRAM reserve, its own learned
-expert profile and Qwen's official BF16 token embedding. Measurements and what was tried:
+**Live since 2026-11-15:** `rtx5090-unsloth-v31-iq4xs.json`, Unsloth's V3.1 UD-IQ4_XS with huihui-ai's abliteration
+patch at level 1 (`/home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf`, pack
+`packs/unsloth-v31-iq4_xs-l1`; built by `MODELS/huihui-patch-unsloth/make_l1.py`). The level-0 file
+(`...UD-IQ4_XS.gguf`, pack `packs/unsloth-v31-iq4_xs`) is kept. The service `qwen-orca-iq4xs.service` keeps its name (the
+app pins it) and starts this profile. Against the older profile below it reads the n-gram table with direct SSD reads,
+uses `STRATA_AVX512_EXPERTS=1`, a 1152 MiB VRAM reserve, its own learned expert profile, Qwen's official BF16 token
+embedding, and since round 2 the expert RAM on 2 MiB pages where free (`STRATA_PIN_GUARD=2`, `STRATA_COMPLEMENT_THP=2`).
+Measurements and what was tried:
 [`bench/results/2026-11-15-spark-5090-unsloth-v31`](../bench/results/2026-11-15-spark-5090-unsloth-v31/README.md).
-To go back, point the unit's `--config` at `rtx5090-orca-iq4xs.json`; the engine from before is
-`engine/strata-2026-11-06-backup`.
+To go back, point the unit's `--config` at `rtx5090-orca-iq4xs.json`; the engines from before are
+`engine/strata-2026-11-15-backup` (before round 2) and `engine/strata-2026-11-06-backup`.
 
 ## The older OrcaRouter IQ4_XS profile
 

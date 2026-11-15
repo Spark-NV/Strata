@@ -62,3 +62,31 @@ layers are Q6_K / Q8_0 and the IQ3_XXS experts cost more to unpack; quality is b
 
 The greedy batches (`r1`, `b2`) were run before Spark asked for sampled probes only; they are kept as files and not used
 above.
+
+## Round 2 (level-1 abliterated file)
+
+**Measured on:** the same PC, 2026-11-15, the file `Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf`
+(huihui-ai's Unsloth patch at `--ablate-experts 1`), sampled probes as above. Mixed decode is "total tok/s over prompts
+3-16" of `probe2.py`; the runs are grouped by the start's PCIe probe reading (see the first change).
+
+### Kept
+
+| Change | What | Measured |
+|---|---|---|
+| PCIe probe waits for the link (`generate.cpp`, `probe_pcie_h2d_gbps`) | An idle RTX 5090 keeps its link at a low speed until traffic raises it. The probe's four bursts often all read 7.3 GB/s, and that start kept a PCIe share of 0.10 instead of 0.55 for the whole session. Now a round under 20 GB/s is followed by up to 7 more (about 1 s at most), and the best reading counts. `STRATA_PCIE_PROBE_ROUNDS=1` keeps one round. | 30 of about 90 starts on this day read 7-21 GB/s, the live service's last two starts too. Mixed decode with the old engine: slow-probe starts 122.4 / 123.5, good-probe starts 129.0-138.9 (mean 134.0, n=4). With the fix the probe read 57.6-57.8 GB/s in all 6 starts, 5 of them after a slow first round. |
+| IQ3_XXS grid decode with AVX-512 VBMI (`iq_avx512.cpp`, `Fmt<118>`) | On Zen 4 (no fast gather) the 64-value groups were built from 16 table loads and inserts. Now a whole 256-value block goes through `vpermi2b` / `vpermb`, and its 32 sign indices through one `vpmultishiftqb`. The same bytes, so the same sums. `STRATA_NO_IQ3_VBMI=1` turns it off. | Bit-exact: `iq3_vbmi_parity` (1-8 tokens, gate/up and plain rows, 40 random trials) gives the same hash both ways; `quant_quality.py` with every expert on the CPU gives a byte-identical file with the old and the new engine. Gate/up `pool_layer_bench` (IQ3_XXS/Q5_0): 0.064 -> 0.040 ms a layer from cache, 0.066 -> 0.049 from RAM. All-CPU quality run 20.1 -> 18.3 s a segment. Normal decode: no measurable change (there the pool waits on RAM, not on the decode). |
+| Expert RAM on 2 MiB pages where free (`STRATA_PIN_GUARD=2` + `STRATA_COMPLEMENT_THP=2`, `expert_source.cpp`) | `cudaHostAlloc` gives the 48.7 GiB complement 4 KiB pages. Mode 2 allocates it 2 MiB-aligned (THP "always" fills free blocks, no compaction) and page-locks it with one `cudaHostRegister`. Only the page size changes. | 20-30 GiB on huge pages, pinned in 27-33 s (34-37 s before). Per CPU expert entry, gate/up 1.24-1.29 vs 1.25-1.30 ms (last batch) and 1.29-1.33 vs 1.44-1.54 ms (first batch, mode 1); mixed 139.2-141.1 vs 139.4-141.0. A floor, not a measured gain. Mode 1 (`MADV_HUGEPAGE`) got a few GiB more but its start grew to 290 s as the RAM fragmented; `MADV_COLLAPSE` failed here (no free blocks). |
+
+**Result:** mixed decode 139-141 tok/s on every start (5 of 5), where the old engine gave 122-139 depending on the probe.
+Quality (`qq-compare.txt` method, against the old reference): level 1 perplexity 4.010, top-1 85.37% (level 0: 3.988,
+85.89%); the old and the new engine give the same file.
+
+### Tried and not kept
+
+| Idea | Result |
+|---|---|
+| `STRATA_HC_Q8=1` (on this file the GGUF's own Q8_0 hyper-connection weights, exact) | mixed 127.8 / 134.1 / 133.4 against 129.0-138.9: no faster, GPU-reach wait higher |
+| `--mtp-q4 all` (4-bit draft layer and head) | 133.7 vs 140.5: drafts accepted 0.691 vs 0.719 |
+| `STRATA_GRAPH_PRIO=1` | 139.8 vs 140.5 |
+| `STRATA_DEQUANT_SIDE=1` (prompt) | 13K / 52K tokens: 5,897 / 7,032 vs 5,851 / 7,031 tok/s |
+| `STRATA_PF_FUSED_NT=256 STRATA_PF_BATCH=256` (prompt) | 5,758 / 6,943 vs 5,793 / 6,973 |

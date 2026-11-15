@@ -1,0 +1,23 @@
+[y-pA1] up in 58s
+p8k: prompt tok/s [5402.9, 5808.9, 5851.3] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+p32k: prompt tok/s [7202.2, 6909.0, 7031.3] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+[y-pA1] decode timing medians over 4 requests: {'ms/window': 16.275, 'tok/win': 1.25, 'verify': 13.065, 'reach': 7.005, 'layerhost': 5.665, 'stage': 0.0, 'commit': 0.03, 'draft': 0.69, 'ajoin': 0.285, 'other': 0.01, 'cpuexp': 1.525}
+[y-pA1] pool: {'gu': 2.736, 'q': 0.011, 'down': 2.281, 'GBs': 37.15}
+[y-pS1] up in 64s
+p8k: prompt tok/s [5299.1, 5893.3, 5897.0] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+p32k: prompt tok/s [7279.8, 7026.7, 7032.4] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+[y-pS1] decode timing medians over 4 requests: {'ms/window': 14.095, 'tok/win': 1.25, 'verify': 11.285, 'reach': 6.815, 'layerhost': 4.055, 'stage': 0.0, 'commit': 0.03, 'draft': 0.57, 'ajoin': 0.465, 'other': 0.01, 'cpuexp': 1.255}
+[y-pS1] pool: {'gu': 2.064, 'q': 0.009, 'down': 1.797, 'GBs': 39.0}
+server died
+[y-pA2] up in 58s
+p8k: prompt tok/s [5290.8, 5804.1, 5792.9] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+p32k: prompt tok/s [7148.2, 6895.9, 6972.8] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+[y-pA2] decode timing medians over 4 requests: {'ms/window': 15.64, 'tok/win': 1.46, 'verify': 12.65, 'reach': 5.97, 'layerhost': 6.27, 'stage': 0.015, 'commit': 0.03, 'draft': 0.555, 'ajoin': 0.645, 'other': 0.01, 'cpuexp': 2.465}
+[y-pA2] pool: {'gu': 3.541, 'q': 0.015, 'down': 2.505, 'GBs': 49.5}
+server died
+[y-pN2] up in 56s
+p8k: prompt tok/s [5324.0, 5789.6, 5757.7] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+p32k: prompt tok/s [7123.4, 6882.1, 6942.9] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+[y-pN2] decode timing medians over 4 requests: {'ms/window': 15.355, 'tok/win': 1.46, 'verify': 12.41, 'reach': 5.885, 'layerhost': 6.08, 'stage': 0.0, 'commit': 0.03, 'draft': 0.555, 'ajoin': 0.71, 'other': 0.01, 'cpuexp': 2.425}
+[y-pN2] pool: {'gu': 3.41, 'q': 0.016, 'down': 2.457, 'GBs': 49.1}
+DONE

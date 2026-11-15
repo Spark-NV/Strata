@@ -1,0 +1,29 @@
+[x-base1] up in 64s
+story: decode median 182.9 mean 184.0 all [178.8, 181.3, 184.5, 191.8, 179.4, 188.0] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.613
+code: decode median 212.1 mean 211.8 all [191.1, 223.9, 220.1, 231.3, 200.0, 204.1] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.810
+words: decode median 124.1 mean 131.1 all [128.2, 120.0, 108.1, 119.8, 164.2, 146.5] out [101, 91, 65, 9, 6, 6, 9, 8] acc 0.705
+mixed: total decode 136.7 tok/s over 14 prompts (3584 tokens), median 133.3, acc 0.706
+[x-base1] decode timing medians over 38 requests: {'ms/window': 12.405, 'tok/win': 1.985, 'verify': 10.625, 'reach': 5.9, 'layerhost': 4.255, 'stage': 0.02, 'commit': 0.03, 'draft': 0.97, 'ajoin': 0.145, 'other': 0.01, 'cpuexp': 1.395}
+[x-base1] pool: {'gu': 2.386, 'q': 0.013, 'down': 1.643, 'GBs': 40.75}
+[x-thp2] up in 76s
+story: decode median 185.6 mean 184.5 all [185.7, 185.5, 188.3, 182.7, 176.1, 188.6] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.600
+code: decode median 216.1 mean 221.2 all [234.1, 209.9, 254.5, 197.1, 209.6, 222.2] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.793
+words: decode median 143.9 mean 151.9 all [139.4, 148.4, 151.4, 123.2, 125.3, 223.5] out [30, 42, 41, 256, 14, 6, 5, 8] acc 0.575
+mixed: total decode 142.1 tok/s over 14 prompts (3566 tokens), median 144.1, acc 0.703
+[x-thp2] decode timing medians over 38 requests: {'ms/window': 11.86, 'tok/win': 1.92, 'verify': 10.16, 'reach': 5.925, 'layerhost': 3.96, 'stage': 0.02, 'commit': 0.03, 'draft': 0.935, 'ajoin': 0.145, 'other': 0.01, 'cpuexp': 1.375}
+[x-thp2] pool: {'gu': 2.212, 'q': 0.011, 'down': 1.466, 'GBs': 44.3}
+[x-base2] up in 60s
+story: decode median 183.0 mean 183.8 all [182.6, 183.4, 181.0, 182.4, 185.8, 187.7] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.590
+code: decode median 219.6 mean 220.6 all [211.5, 214.6, 228.4, 224.6, 239.7, 205.0] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.772
+words: decode median 132.4 mean 136.8 all [137.8, 168.1, 124.0, 125.8, 135.4, 129.4] out [39, 42, 174, 39, 8, 6, 6, 11] acc 0.505
+mixed: total decode 131.5 tok/s over 14 prompts (3548 tokens), median 131.8, acc 0.697
+[x-base2] decode timing medians over 38 requests: {'ms/window': 11.63, 'tok/win': 2.005, 'verify': 10.08, 'reach': 5.875, 'layerhost': 3.5, 'stage': 0.02, 'commit': 0.03, 'draft': 0.935, 'ajoin': 0.16, 'other': 0.01, 'cpuexp': 1.245}
+[x-base2] pool: {'gu': 1.912, 'q': 0.01, 'down': 1.336, 'GBs': 42.35}
+[x-thp3] up in 76s
+story: decode median 186.0 mean 187.4 all [185.5, 185.5, 187.5, 195.9, 183.8, 186.5] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.602
+code: decode median 200.9 mean 198.0 all [201.7, 200.1, 211.9, 182.3, 206.1, 185.7] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.788
+words: decode median 153.0 mean 142.8 all [159.8, 162.0, 149.3, 109.7, 119.0, 156.7] out [103, 32, 31, 46, 7, 7, 5, 17] acc 0.590
+mixed: total decode 138.9 tok/s over 14 prompts (3570 tokens), median 142.8, acc 0.721
+[x-thp3] decode timing medians over 38 requests: {'ms/window': 12.825, 'tok/win': 1.945, 'verify': 10.87, 'reach': 5.9, 'layerhost': 4.4, 'stage': 0.06, 'commit': 0.03, 'draft': 0.925, 'ajoin': 0.155, 'other': 0.01, 'cpuexp': 1.555}
+[x-thp3] pool: {'gu': 2.463, 'q': 0.013, 'down': 1.692, 'GBs': 44.6}
+DONE

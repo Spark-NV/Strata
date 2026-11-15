@@ -1,0 +1,19 @@
+engine: /home/spark/Apps/Strata/engine/strata --serve --pack /home/spark/Apps/Strata/packs/unsloth-v31-iq4_xs-l1 --native /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-gguf /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-io direct --embd-gguf /home/spark/Apps/MODELS/token-embd-bf16-official.gguf --expert-profile /home/spark/Apps/Strata/data/expert-profile-unsloth-v31-learned.bin --mmap-experts --resident-budget-gib 64 --spec 4 --spec-min-p 0.7 --mtp /home/spark/Apps/Strata/mtp/rt --vram-reserve-mib 1152 --vram-elastic-hold-mib 2816 --expert-cache 1 --adapt-every 100000 --pcie-frac 0 --suffix-draft 0 --prompt-cache 0 --kv fp16 --max-context 1512 --short-read 1064 --prefill 512
+code: 999 positions, 20.9 s
+docs: 999 positions, 20.2 s
+english: 999 positions, 19.3 s
+multilingual: 999 positions, 20.0 s
+agent: 999 positions, 20.3 s
+engine: /home/spark/Apps/Strata/engine/strata-test-all --serve --pack /home/spark/Apps/Strata/packs/unsloth-v31-iq4_xs-l1 --native /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-gguf /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-io direct --embd-gguf /home/spark/Apps/MODELS/token-embd-bf16-official.gguf --expert-profile /home/spark/Apps/Strata/data/expert-profile-unsloth-v31-learned.bin --mmap-experts --resident-budget-gib 64 --spec 4 --spec-min-p 0.7 --mtp /home/spark/Apps/Strata/mtp/rt --vram-reserve-mib 1152 --vram-elastic-hold-mib 2816 --expert-cache 1 --adapt-every 100000 --pcie-frac 0 --suffix-draft 0 --prompt-cache 0 --kv fp16 --max-context 1512 --short-read 1064 --prefill 512
+code: 999 positions, 18.9 s
+docs: 999 positions, 18.4 s
+english: 999 positions, 17.6 s
+multilingual: 999 positions, 18.2 s
+agent: 999 positions, 18.6 s
+reference: bench/results/2026-11-15-spark-5090-unsloth-v31/qq-old.tsv
+run                                      segment         pos    top1       KL   KL p99     PPL PPL ref
+qq-new.tsv                               all            4995  85.89%  0.16927   2.0711   3.988   4.115
+qq-l1-old.tsv                            all            4995  85.37%  0.18287   2.2585   4.010   4.115
+qq-l1-new.tsv                            all            4995  85.37%  0.18287   2.2585   4.010   4.115
+IDENTICAL old/new engine on level 1
+DONE

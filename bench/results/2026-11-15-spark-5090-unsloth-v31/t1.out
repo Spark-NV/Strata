@@ -1,0 +1,18 @@
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /home/spark/Apps/Strata/.venv, got /home/spark/Apps/Strata/bench/results/2026-11-15-spark-5090-unsloth-v31/../../../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /home/spark/Apps/Strata/.venv, got /home/spark/Apps/Strata/bench/results/2026-11-15-spark-5090-unsloth-v31/../../../.venv
+[l1-base] up in 58s
+story: decode median 182.6 mean 181.5 all [176.2, 171.2, 189.5, 179.7, 185.5, 187.2] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.586
+code: decode median 183.6 mean 180.3 all [151.7, 182.9, 163.9, 193.5, 184.3, 205.5] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.777
+words: decode median 133.6 mean 136.2 all [166.4, 110.7, 152.1, 136.7, 120.5, 130.5] out [104, 256, 29, 18, 214, 6, 6, 8] acc 0.559
+mixed: total decode 122.4 tok/s over 14 prompts (3555 tokens), median 119.8, acc 0.712
+[l1-base] decode timing medians over 38 requests: {'ms/window': 13.72, 'tok/win': 1.995, 'verify': 12.085, 'reach': 5.71, 'layerhost': 5.695, 'stage': 0.045, 'commit': 0.02, 'draft': 0.955, 'ajoin': 0.165, 'other': 0.01, 'cpuexp': 1.76}
+[l1-base] pool: {'gu': 3.599, 'q': 0.014, 'down': 1.808, 'GBs': 38.3}
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /home/spark/Apps/Strata/.venv, got /home/spark/Apps/Strata/bench/results/2026-11-15-spark-5090-unsloth-v31/../../../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /home/spark/Apps/Strata/.venv, got /home/spark/Apps/Strata/bench/results/2026-11-15-spark-5090-unsloth-v31/../../../.venv
+[l1-prof] up in 64s
+story: decode median 176.4 mean 176.4 all [172.9, 180.0] out [256, 256, 256, 256] acc 0.626
+code: decode median 193.5 mean 193.5 all [189.2, 197.8] out [256, 256, 256, 256] acc 0.761
+words: decode median 136.8 mean 136.8 all [142.6, 131.0] out [33, 70, 105, 210] acc 0.598
+[l1-prof] decode timing medians over 10 requests: {'ms/window': 11.34, 'tok/win': 1.8, 'verify': 10.075, 'reach': 6.535, 'layerhost': 3.105, 'stage': 0.01, 'commit': 0.02, 'draft': 0.78, 'ajoin': 0.065, 'other': 0.01, 'cpuexp': 1.155}
+[l1-prof] pool: {'gu': 1.89, 'q': 0.009, 'down': 1.058, 'GBs': 45.9}
+DONE

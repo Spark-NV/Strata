@@ -1,0 +1,9 @@
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /home/spark/Apps/Strata/.venv, got /home/spark/Apps/Strata/bench/results/2026-11-15-spark-5090-unsloth-v31/../../../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /home/spark/Apps/Strata/.venv, got /home/spark/Apps/Strata/bench/results/2026-11-15-spark-5090-unsloth-v31/../../../.venv
+[x-thp1] up in 114s
+story: decode median 191.1 mean 190.2 all [196.5, 187.4, 194.7, 182.1, 184.9, 195.8] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.615
+code: decode median 214.4 mean 213.1 all [207.8, 191.9, 219.7, 230.1, 218.9, 209.9] out [256, 256, 256, 256, 256, 256, 256, 256] acc 0.795
+words: decode median 140.5 mean 142.2 all [146.5, 162.1, 131.6, 129.9, 134.5, 148.8] out [38, 29, 35, 42, 5, 6, 6, 10] acc 0.679
+mixed: total decode 140.2 tok/s over 14 prompts (3584 tokens), median 141.6, acc 0.700
+[x-thp1] decode timing medians over 38 requests: {'ms/window': 12.17, 'tok/win': 1.85, 'verify': 10.495, 'reach': 5.855, 'layerhost': 3.89, 'stage': 0.02, 'commit': 0.03, 'draft': 0.91, 'ajoin': 0.175, 'other': 0.01, 'cpuexp': 1.38}
+[x-thp1] pool: {'gu': 2.122, 'q': 0.011, 'down': 1.472, 'GBs': 44.45}
