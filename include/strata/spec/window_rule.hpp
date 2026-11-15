@@ -10,6 +10,8 @@
 #include <cstdlib>
 #include <algorithm>
 
+#include "strata/core/draft_cum.hpp"
+
 namespace strata::spec {
 
 struct WindowRuleIn {
@@ -24,6 +26,7 @@ struct WindowRuleIn {
     double spec_min_p = 0.0;     ///< --spec-min-p: stop at the first draft whose probability is below it (0: off)
     double draft_conf = 0.0;     ///< --draft-conf: DFlash2's window ends where the product of the probabilities falls below it (0: off)
     const float* dprob = nullptr;   ///< the drafts' probabilities, dprob[j] for draft j (the row j + 1 of the window)
+    float cum_th = 0.0f;         ///< STRATA_DRAFT_CUM: the request's cumulative threshold (core/draft_cum.hpp; 0: off)
 };
 
 /// The cost-aware MTP window applies only to the MTP chain's own candidates.
@@ -57,6 +60,10 @@ inline int choose_window(const WindowRuleIn& in) {
     int T = in.start;
     if (cost_window_applies(in.use_mtp, in.spec_cost, in.df2_active, in.first_window)) {
         T = std::clamp(in.chain_rows, 1, in.cap);
+    } else if (in.draft_on && in.cum_th > 0.0f && in.dprob != nullptr) {   // the same float products as the chain rule
+        T = 1;
+        float c = 1.0f;
+        while (T < in.cap && (c = c * strata::core::draft_cum_acc(in.dprob[T - 1])) >= in.cum_th) ++T;
     } else if (in.draft_on && in.spec_min_p > 0.0 && in.dprob != nullptr) {
         T = 1;
         while (T < in.cap && in.dprob[T - 1] >= (float) in.spec_min_p) ++T;

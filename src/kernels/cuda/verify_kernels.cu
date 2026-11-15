@@ -1665,6 +1665,37 @@ void wait_flag_ge_stamped(const uint32_t* flag, uint32_t value, unsigned long lo
     check("wait_flag_ge_stamped");
 }
 
+namespace {
+struct L2Ranges { L2Range r[kL2MaxRanges]; int n; };
+constexpr unsigned long long kL2Chunk = 64ull << 10;   // bytes per bulk prefetch
+// One thread per 64 KiB chunk of the listed ranges: a bulk L2 prefetch (TMA, sm_90+) each, nothing written.
+__global__ void l2_prefetch_kernel(L2Ranges rs) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    const unsigned long long tid = blockIdx.x * (unsigned long long) blockDim.x + threadIdx.x;
+    const unsigned long long stride = (unsigned long long) gridDim.x * blockDim.x;
+    for (int k = 0; k < rs.n; ++k) {
+        const unsigned long long nch = (rs.r[k].bytes + kL2Chunk - 1) / kL2Chunk;
+        for (unsigned long long c = tid; c < nch; c += stride) {
+            const unsigned long long off = c * kL2Chunk;
+            const unsigned sz = (unsigned) (min(kL2Chunk, rs.r[k].bytes - off) & ~15ull);
+            if (sz == 0) continue;
+            const char* p = (const char*) rs.r[k].p + off;
+            asm volatile("cp.async.bulk.prefetch.L2.global [%0], %1;" :: "l"(p), "r"(sz) : "memory");
+        }
+    }
+#endif
+}
+}  // namespace
+
+void l2_prefetch(const L2Range* ranges, int n, void* stream) {
+    if (n <= 0) return;
+    L2Ranges rs{};
+    rs.n = n < kL2MaxRanges ? n : kL2MaxRanges;
+    for (int i = 0; i < rs.n; ++i) rs.r[i] = ranges[i];
+    l2_prefetch_kernel<<<8, 128, 0, (cudaStream_t) stream>>>(rs);
+    check("l2_prefetch");
+}
+
 void embedding_gather_dev(const uint8_t* codes, const float* scales, const float* offsets, const int32_t* tokens,
                           int n_tok, int64_t n, int code_bits, int code_bias, int group_elems, uint64_t row_codes,
                           uint64_t row_groups, float* out, void* stream) {

@@ -556,6 +556,10 @@ private:
     unsigned long long* rr_stats_ = nullptr;   ///< STRATA_ROUTE_RESIDENT's counters on device_ (#1578); null: none
     std::atomic<bool> released_{false};  ///< #267: release_gpu_waits ran (maybe on the watchdog thread): no more windows
     bool all_resident_ = false;           ///< 100% of experts in [lb_, le_) resident in VRAM: zero-doorbell graph
+    /// STRATA_L2_NEXT=1: per layer, the device ranges of its non-expert weights, read into L2 while the layer before
+    /// waits for the CPU tier (built on the first window)
+    std::vector<std::vector<strata::kernels::L2Range>> l2_next_;
+    bool l2_next_built_ = false;
     /// #871: the zero-doorbell graph plans from the device residency table alone, so it is only right while every
     /// expert of the stage is in VRAM.  A prompt loan, a VRAM shrink or an adaptive swap marks some -1 for a while:
     /// every window then runs the doorbell graph (exec_nr_ / the batch key's top bit), the same as a stage that never

@@ -78,6 +78,7 @@
 #include "strata/core/verify.hpp"
 #include "strata/core/mtp.hpp"
 #include "strata/core/gated_proposal.hpp"
+#include "strata/core/draft_cum.hpp"
 #if defined(STRATA_HAVE_DFLASH2)
 #include "strata/core/dflash2.hpp"
 #include "strata/core/draft_cap.hpp"
@@ -13451,6 +13452,22 @@ int main(int argc, char** argv) {
                 chain_rows = chain_st.best_rows;
                 return k;
             });
+        // STRATA_DRAFT_CUM=<th> (core/draft_cum.hpp, from Basalt): the chain keeps drafting while the joint chance that every
+        // draft so far is accepted stays >= the request's threshold; the window rule takes the same drafts (cum_window_th)
+        const bool draft_cum = !spec_cost && use_mtp && strata::core::draft_cum_env() > 0.0f && n_stages == 1;
+        strata::core::DraftCumAdapt cum_adapt(strata::core::draft_cum_env());
+        float cum_c = 1.0f;
+        bool cum_req = true;   // false: the request turned the draft cut off (spec_min_p 0), so its chains run whole
+        if (draft_cum) {
+            mtp.set_chain_rule([&](int idx, float pj) {
+                if (!cum_req) return true;
+                if (idx == 0) cum_c = 1.0f;
+                cum_c = cum_c * strata::core::draft_cum_acc(pj);
+                return cum_c >= cum_adapt.th();
+            });
+            std::fprintf(stderr, "strata serve: cumulative draft rule on (STRATA_DRAFT_CUM=%.3f, per-request adapt %s)\n",
+                         (double) strata::core::draft_cum_env(), strata::core::draft_cum_adapt_env() ? "on" : "off");
+        }
         policy.set_sizes(lookup_size_mask(o));
         // a layer split's hand-off buffers hold kVerifyNarrowT rows: its windows stay at that
         if (n_stages > 1) policy.set_sizes(policy.sizes() & ((2u << strata::kernels::kVerifyNarrowT) - 1u));
@@ -17486,6 +17503,8 @@ int main(int argc, char** argv) {
             std::vector<int32_t> drafts(DS, 0), window(WS), outv(WS);
             std::vector<float> dprob(DS, 0.0f);
             std::array<float, 8> dwin_s{};   // the probabilities the current window was chosen from (STRATA_SPEC_COST)
+            cum_adapt.reset();   // STRATA_DRAFT_CUM: every request starts from the base threshold
+            cum_req = req_spec_min_p > 0.0;
             // STRATA_SPEC_TRACE=<file> in serve (bench only, off by default): per round "R p T a sfx ms k match | probs | drafts | lookup draft | committed tokens"
             static std::FILE* const df2_trace = [] { const char* tf = std::getenv("STRATA_SPEC_TRACE"); return tf != nullptr && tf[0] != '\0' ? std::fopen(tf, "a") : nullptr; }();
             static const bool trace_nopick = std::getenv("STRATA_SPEC_TRACE_NOPICK") != nullptr;   // the lookup draft is logged but never taken
@@ -18325,6 +18344,7 @@ int main(int argc, char** argv) {
                         wr.use_mtp = use_mtp; wr.draft_on = draft_on; wr.df2_active = req_df2; wr.spec_cost = spec_cost; wr.first_window = first_window;
                         wr.chain_rows = chain_rows; wr.cap = S_mtp; wr.start = T; wr.spec_min_p = req_spec_min_p;
                         wr.draft_conf = o.draft_conf; wr.dprob = dprob.data();
+                        if (draft_cum && req_spec_min_p > 0.0) wr.cum_th = cum_adapt.th();
                         T = strata::spec::choose_window(wr);
                     }
                     if (first_window) T = merge_T > 0 ? merge_T : 1;
@@ -18693,6 +18713,8 @@ int main(int argc, char** argv) {
                     if (tp_end == nullptr || !df2.context(tp_end, a + 1, p, err)) { if (adapt_thr.joinable()) adapt_thr.join(); std::printf("ERR %s\n", err.c_str()); return 1; }
                 }
 #endif
+                // STRATA_DRAFT_CUM: this window's MTP drafts against what the bin table expected, before the next chain is drafted
+                if (draft_cum && !from_sfx && !merged && T_mtp > 1) cum_adapt.observe(dwin_s.data(), std::min(T_mtp - 1, 7), std::min(a, T_mtp - 1));
                 const GatedDraftLimit draft_limit(mtp, gated_proposal, S_mtp, p + a + 1, o.max_context);
                 const bool drafted = !draft_on || eos || produced_n >= max_new ||
                                      (req_df2 ? ((!merged && defer_df2(a)) || draft_df2(a)) : mtp.draft_long(T, outv.data(), p, a, drafts.data(), err, dprob.data(), (float) req_spec_min_p,

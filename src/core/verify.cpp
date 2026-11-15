@@ -314,6 +314,22 @@ const bool g_coherent = env_on("STRATA_VERIFY_COHERENT");
 const bool g_doorbell_store = env_on("STRATA_DOORBELL_STORE");
 #endif
 const bool g_trace = env_on("STRATA_VERIFY_TRACE");
+// STRATA_L2_NEXT=1 (opt-in): while a layer waits for the CPU tier's rows, the next layer's non-expert weights are read
+// into L2 (bulk prefetch).  Only caches move: every result is the same.
+const bool g_l2_next = env_on("STRATA_L2_NEXT");
+// bytes of a native GGUF matrix of `type` with rows of ne0 values, ne1 rows (0: a type this does not know)
+uint64_t l2_native_bytes(int type, int64_t ne0, int64_t ne1) {
+    int be = 0, bb = 0;
+    switch (type) {
+        case 0: be = 1; bb = 4; break;      case 1: case 30: be = 1; bb = 2; break;
+        case 2: be = 32; bb = 18; break;    case 6: be = 32; bb = 22; break;    case 8: be = 32; bb = 34; break;
+        case 12: be = 256; bb = 144; break; case 13: be = 256; bb = 176; break; case 14: be = 256; bb = 210; break;
+        case 20: be = 32; bb = 18; break;   case 23: be = 256; bb = 136; break; case 42: be = 64; bb = 18; break;
+        default: return 0;
+    }
+    if (ne0 <= 0 || ne1 <= 0 || ne0 % be) return 0;
+    return (uint64_t) (ne0 / be) * (uint64_t) bb * (uint64_t) ne1;
+}
 // STRATA_LAUNCH_PROBE (STRIX-TDR): process start, and the first windows' launch timing
 const Clock::time_point g_proc_t0 = Clock::now();
 Clock::time_point probe_proc_t0() { return g_proc_t0; }
@@ -1343,6 +1359,40 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
     const int64_t IQ = g.idx_q_heads, ID = g.idx_key_dim, NE = g.n_expert, MT = max_t_;
     const QsaShapes s = shapes_of(g);
     const GrShapes gs{g.n_embd, g.hc, g.hc_lr};
+    if (g_l2_next && !l2_next_built_) {
+        l2_next_built_ = true;
+        l2_next_.assign((size_t) g.n_layers, {});
+        uint64_t total = 0;
+        const char* cap_e = std::getenv("STRATA_L2_NEXT_MIB");
+        const uint64_t l2_cap = cap_e != nullptr ? (uint64_t) std::atoll(cap_e) << 20 : 0;
+        std::vector<uint64_t> l2_used((size_t) g.n_layers, 0);
+        auto on_device = [](const void* p) {
+            cudaPointerAttributes at{};
+            if (cudaPointerGetAttributes(&at, p) != cudaSuccess) { cudaGetLastError(); return false; }
+            return at.type == cudaMemoryTypeDevice;
+        };
+        for (const auto& [name, w] : wt.all()) {
+            if (name.rfind("blk.", 0) != 0 || name.find("_exps") != std::string::npos) continue;
+            const int64_t l = std::atoll(name.c_str() + 4);
+            if (l < lb_ || l >= le_) continue;
+            auto add = [&](const void* p, uint64_t b) {
+                if (p == nullptr || b < 4096 || !on_device(p)) return;
+                if (l2_cap > 0 && l2_used[(size_t) l] >= l2_cap) return;   // STRATA_L2_NEXT_MIB: the layer's first bytes only
+                if (l2_cap > 0) b = std::min<uint64_t>(b, l2_cap - l2_used[(size_t) l]);
+                l2_used[(size_t) l] += b;
+                const uintptr_t a0 = (uintptr_t) p, a16 = (a0 + 15) & ~(uintptr_t) 15;
+                l2_next_[(size_t) l].push_back({(const void*) a16, (unsigned long long) (b - (a16 - a0))});
+                total += b;
+            };
+            if (w.native_data != nullptr) add(w.native_data, l2_native_bytes(w.native_type, w.ne0, w.ne1));
+            if (w.data != nullptr && w.resident) add(w.data, w.bytes);
+        }
+        size_t most = 0;
+        for (const auto& v : l2_next_) most = std::max(most, v.size());
+        std::fprintf(stderr, "strata verify: STRATA_L2_NEXT on: %.1f MiB of non-expert weights a layer on average, up to %zu "
+                             "ranges (the first %d are read)\n", (double) total / (1 << 20) / (double) std::max<int64_t>(1, le_ - lb_),
+                     most, strata::kernels::kL2MaxRanges);
+    }
     const uint64_t gdn_floats = (uint64_t) g.ssm_state_size * g.ssm_v_heads * g.ssm_state_size +
                                 (uint64_t) g.ssm_conv_channels * (g.ssm_d_conv - 1);
     const int64_t HS = (int64_t) NG_HIST * NG_HC_DIM;
@@ -2438,6 +2488,8 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
                                          skip_ + grp, ring, cs);
             } else {
                 const bool fuse_rows = fuse_rows_on() && !prof_on_ && !remote_opt_ && dec_batch && m_bal_ == nullptr;   // 143-amdk
+                if (g_l2_next && grp == G - 1 && l + 1 < le_ && !l2_next_[(size_t) (l + 1)].empty())   // while the CPU rows come
+                    strata::kernels::l2_prefetch(l2_next_[(size_t) (l + 1)].data(), (int) l2_next_[(size_t) (l + 1)].size(), cs);
                 if (!fuse_rows) {
                     if (m_bal_ != nullptr)   // set_pcie_balance: ... and ends as it waits for the CPU's rows
                         wait_flag_ge_stamped(m_flag_, ring, m_bal_ + ((l - lb_) * 2 + grp) * 4 + 2, nullptr, cs);
