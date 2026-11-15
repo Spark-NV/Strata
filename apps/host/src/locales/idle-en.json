@@ -1,0 +1,13 @@
+{
+ "id01": "Idled by you · starts when you write",
+ "id02": "Start now",
+ "id03": "Idle the model now to free the graphics card and its memory for other work. It is the same as 30 minutes without use: it starts again by itself when you type or send a chat, in about half a minute.",
+ "id04": "The model is idle and the graphics card is free. It starts again by itself when you type or send a chat, or start it now.",
+ "id05": "The model can be idled once it is running.",
+ "id06": "A chat is working now. Idling stops its answer.",
+ "id07": "Idled by you to free the graphics card.",
+ "id08": "Idled by you",
+ "id09": "Idle now",
+ "id10": "Idling…",
+ "id11": "Open Monitor"
+}

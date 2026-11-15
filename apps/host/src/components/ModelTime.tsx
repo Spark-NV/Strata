@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { tr } from '../lib/i18n';
 import { api } from '../lib/client';
-import { useStore } from '../lib/store';
+import { IDLE_BY_HAND, useStore } from '../lib/store';
 
 /** How long the pinned model ran and was stopped (server/model-release.mjs, GET /api/pinned/activity). */
 interface Totals { running: number; idle: number; game: number; image: number; other: number }
@@ -67,7 +67,7 @@ export function ModelTime() {
     const gone = Math.max(0, Date.now() - data.readAt), bucket: keyof Totals | null = !cur ? null : cur.up ? 'running' : cur.reason ?? 'other';
     const grow = (t: Totals): Totals => bucket ? { ...t, [bucket]: (t[bucket] ?? 0) + gone } : t;
     const idleMs = data.idleMs !== null ? data.idleMs + gone : null;
-    const stoppedWhy = cur?.reason === 'image' ? (cur.detail ? tr('For images: {0}', [cur.detail]) : tr('For images')) : cur?.reason === 'game' ? (cur.detail ? tr('For a game: {0}', [cur.detail]) : tr('For a game')) : cur?.reason === 'idle' ? tr('After {0} idle', [cur.detail ?? span(data.idleLimitMs)]) : tr('Outside the app, or while it was closed');
+    const stoppedWhy = cur?.reason === 'image' ? (cur.detail ? tr('For images: {0}', [cur.detail]) : tr('For images')) : cur?.reason === 'game' ? (cur.detail ? tr('For a game: {0}', [cur.detail]) : tr('For a game')) : cur?.reason === 'idle' ? (cur.detail === IDLE_BY_HAND ? tr('Idled by you') : tr('After {0} idle', [cur.detail ?? span(data.idleLimitMs)])) : tr('Outside the app, or while it was closed');
     const head = !cur ? tr('Nothing recorded yet') : cur.up ? tr('Running for {0}', [span(since ?? 0)]) : tr('Stopped for {0}', [span(since ?? 0)]);
     const detail = !cur ? '' : !cur.up ? stoppedWhy : data.working ? tr('Working now') : idleMs !== null ? data.idleLimitMs ? tr('Idle for {0} · stops after {1}', [span(idleMs), span(data.idleLimitMs)]) : tr('Idle for {0}', [span(idleMs)]) : '';
     const idlePct = cur?.up && idleMs !== null && data.idleLimitMs ? Math.min(100, idleMs / data.idleLimitMs * 100) : null;

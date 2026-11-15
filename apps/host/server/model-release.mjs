@@ -14,6 +14,9 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+/** The detail of an idle stop the person asked for ("Idle now"), not the idle time passing. */
+export const IDLE_BY_HAND = 'by hand';
+
 export function releaseConfig(env = process.env) {
   const minutes = Number(env.STRATA_PIN_IDLE_MIN ?? 30);
   return {
@@ -128,6 +131,14 @@ export function createModelReleaser({ pinned, idleMs, gameRelease, games, metric
   let missed = 0;          // looks in a row the model did not answer while the app has it as ready
   let ticking = false;
 
+  /** Stops the model and notes why; the same stop for a game, the idle time and the person's own "Idle now". */
+  async function stop(reason, detail) {
+    if (!(await pinned.release(reason, detail))) return null;
+    up = false; busy = false;
+    activity.down(reason, detail);
+    return reason;
+  }
+
   async function tick() {
     if (ticking) return null;
     ticking = true;
@@ -153,12 +164,6 @@ export function createModelReleaser({ pinned, idleMs, gameRelease, games, metric
       missed = 0;
       known = new Set(current.keys());
       if (!up) { up = true; lastActive = now(); activity.up(); }
-      const stop = async (reason, detail) => {
-        if (!(await pinned.release(reason, detail))) return null;
-        up = false; busy = false;
-        activity.down(reason, detail);
-        return reason;
-      };
       if (started.length) {
         log(`model release ·  game started: ${started.map(([, name]) => name).join(', ')}`);
         return stop('game', started[0][1]);
@@ -182,6 +187,14 @@ export function createModelReleaser({ pinned, idleMs, gameRelease, games, metric
   }
   return {
     tick,
+    /**
+     * "Idle now" from the status menu: the same stop as 30 minutes without use, at once, even mid-turn (the person asked for the GPU).
+     * Only a running model; one that is starting, stopping or already stopped is left as it is. The next chat starts it again.
+     */
+    async idleNow() {
+      if (pinned.state().phase !== 'ready') return null;
+      return stop('idle', IDLE_BY_HAND);
+    },
     /**
      * For the Monitor: running or stopped and since when (why, for a stop), how long it has had no work (null while working or stopped),
      * the idle limit, and how long it ran and was stopped today and in the last 7 days.

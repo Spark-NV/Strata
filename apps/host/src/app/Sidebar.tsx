@@ -18,7 +18,7 @@ import { MOD, runCommand } from '../lib/commands';
 import { bindingFor, bindingKeys, useBindings } from '../lib/shortcut-bindings';
 import { Btn, Dialog, Icon, IconBtn, type IconName } from '../components/ui';
 import { Brand } from '../components/Brand';
-import { deleteSession, go, isUnread, liveChatIds, newSession, profileOf, renameSession, selectSession, setNavOpen, togglePin, toggleRail, setTheme, useStore } from '../lib/store';
+import { deleteSession, go, IDLE_BY_HAND, idlePinned, isUnread, liveChatIds, newSession, profileOf, renameSession, selectSession, setNavOpen, startPinned, togglePin, toggleRail, setTheme, useStore } from '../lib/store';
 import type { SessionProfileId } from '../lib/types';
 import { imageModelLine } from '../components/ImageChat';
 /** The chat profiles, in the order the sidebar shows them. */
@@ -67,6 +67,10 @@ export function Sidebar({ containerRef }: {
     const [name, setName] = useState('');
     const [deleteId, setDeleteId] = useState<string | null>(null);
     const [folders, setFolders] = useState<Record<string, boolean>>({});
+    // The status chip's menu for the pinned model: idle it now (the same stop as 30 minutes without use), or start it again.
+    const [modelMenu, setModelMenu] = useState(false);
+    const [idling, setIdling] = useState(false);
+    const [idleError, setIdleError] = useState<string | null>(null);
     const menuTrigger = useRef<HTMLElement | null>(null);
     const current = library?.variants.find(v => v.id === library.loaded);
     const native = useNative(), nativeCurrent = native?.instances.find(i => i.id === native.defaultId);
@@ -78,7 +82,7 @@ export function Sidebar({ containerRef }: {
     const nativeSize = nativeCurrent ? native?.catalog?.families.flatMap(f => f.sizes).find(s => s.id === nativeCurrent.model) : undefined;
     const nativeSecond = nativeCurrent ? [nativeSize?.model ?? nativeCurrent.model.toUpperCase(), nativeCurrent.gpus.length ? nativeCurrent.gpus.map(g => `GPU ${g + 1}`).join(' + ') : ''].filter(Boolean).join(' · ') : null;
     // The pinned model's own state (pinned-model.mjs); released = stopped for a game or after idle time (model-release.mjs).
-    const pinnedLine = !pinned?.enabled ? null : pinned.phase === 'ready' ? tr('Running · {0}K context', [Math.round((pinned.context ?? 0) / 1000)]) : pinned.phase === 'error' ? (pinned.error ?? tr('Not running')) : pinned.phase === 'released' ? (pinned.released?.reason === 'game' ? tr('Stopped for a game · starts when you write') : pinned.released?.reason === 'image' ? tr('Stopped for images · starts when you write') : tr('Stopped while idle · starts when you write')) : pinned.phase === 'stopping' ? tr('Stopping…') : pinned.phase === 'checking' ? tr('Checking…') : tr('Starting…');
+    const pinnedLine = !pinned?.enabled ? null : pinned.phase === 'ready' ? tr('Running · {0}K context', [Math.round((pinned.context ?? 0) / 1000)]) : pinned.phase === 'error' ? (pinned.error ?? tr('Not running')) : pinned.phase === 'released' ? (pinned.released?.reason === 'game' ? tr('Stopped for a game · starts when you write') : pinned.released?.reason === 'image' ? tr('Stopped for images · starts when you write') : (pinned.released?.detail === IDLE_BY_HAND ? tr('Idled by you · starts when you write') : tr('Stopped while idle · starts when you write'))) : pinned.phase === 'stopping' ? tr('Stopping…') : pinned.phase === 'checking' ? tr('Checking…') : tr('Starting…');
     const modelQuant = (imageActive ? imageModelLine(imageModel) : null) ?? pinnedLine ?? nativeSecond ?? current?.quant ?? tr('View model versions');
     const phase = nativeCurrent ? (nativeCurrent.status === 'ready' ? nativeCurrent.phase : nativeCurrent.status) : monitor?.phase ?? 'idle';
     const status = imageActive ? (imageModel!.phase === 'ready' ? (imageModel!.job ? 'Generating' : 'Ready') : imageModel!.phase === 'stopping' ? 'Stopping' : 'Loading') : pinned?.enabled ? (pinned.phase === 'ready' ? 'Ready' : pinned.phase === 'error' ? 'Error' : pinned.phase === 'released' ? 'Stopped' : pinned.phase === 'stopping' ? 'Stopping' : 'Loading') : phase === 'unavailable' ? 'Status unavailable' : phase === 'error' ? 'Error' : phase === 'loading' ? 'Loading' : !current && !nativeCurrent ? 'No model loaded' : phase === 'reading' ? 'Reading prompt' : phase === 'thinking' ? 'Thinking' : phase === 'generating' ? 'Generating' : 'Ready';
@@ -124,7 +128,7 @@ export function Sidebar({ containerRef }: {
         </div> : null}
       </div>
       <div className="nav__foot">
-        <button className="enginechip" data-state={status === 'Ready' ? 'ready' : ['Reading prompt', 'Thinking', 'Generating', 'Loading'].includes(status) ? 'busy' : 'off'} onClick={() => go(pinned?.enabled ? 'monitor' : 'models')} title={tr("{0} \u00B7 {1} \u00B7 {2}", [modelName, workingLine ?? modelQuant, tr(status)])} aria-label={tr("{0} \u00B7 {1}", [modelName, modelQuant])}><span className="enginechip__family"><Icon name={modelFamilyIcon(current?.family)} size={20}/><span className="enginechip__dot"/></span><span className="enginechip__text nav__rail-hide"><span className="enginechip__title">{modelName}</span><span className="enginechip__sub">{workingLine ?? modelQuant}</span></span></button>
+        <button className="enginechip" data-state={status === 'Ready' ? 'ready' : ['Reading prompt', 'Thinking', 'Generating', 'Loading'].includes(status) ? 'busy' : 'off'} aria-haspopup={pinned?.enabled && !imageActive ? 'dialog' : undefined} onClick={() => { if (pinned?.enabled && !imageActive) { setIdleError(null); setModelMenu(true); } else go(pinned?.enabled ? 'monitor' : 'models'); }} title={tr("{0} \u00B7 {1} \u00B7 {2}", [modelName, workingLine ?? modelQuant, tr(status)])} aria-label={tr("{0} \u00B7 {1}", [modelName, modelQuant])}><span className="enginechip__family"><Icon name={modelFamilyIcon(current?.family)} size={20}/><span className="enginechip__dot"/></span><span className="enginechip__text nav__rail-hide"><span className="enginechip__title">{modelName}</span><span className="enginechip__sub">{workingLine ?? modelQuant}</span></span></button>
         <NavLink route="skills" label={tr("Skills")} icon="skills" current={location.route}/>
         <NavLink route="monitor" label={tr("Monitor")} icon="activity" current={location.route}/>
         {tr(pinned?.enabled ? null : <NavLink route="models" label={tr("Models")} icon="models" current={location.route === 'tuning' ? 'models' : location.route}/>)}
@@ -136,6 +140,17 @@ export function Sidebar({ containerRef }: {
       <button role="menuitem" className="menu__item" onClick={() => { togglePin(menuId); closeMenu(); }}><Icon name="pin"/>{tr(menuSession.pinned ? 'Unpin' : 'Pin')}</button>
       <button role="menuitem" className="menu__item menu__item--danger" onClick={() => { setNavOpen(false); setDeleteId(menuId); setMenuId(null); }}><Icon name="trash"/>{tr("Delete chat")}</button>
     </FloatingMenu> : null)}
+    <Dialog open={modelMenu && !!pinned?.enabled} compact title={modelName} onClose={() => setModelMenu(false)} actions={<><Btn onClick={() => { setModelMenu(false); go('monitor'); }}>{tr("Open Monitor")}</Btn>{tr(pinned?.phase === 'released' ? <Btn variant="primary" onClick={() => { startPinned(); setModelMenu(false); }}>{tr("Start now")}</Btn> : <Btn variant="primary" disabled={pinned?.phase !== 'ready' || idling} onClick={async () => {
+                setIdling(true);
+                const problem = await idlePinned();
+                setIdling(false);
+                if (problem) setIdleError(problem); else setModelMenu(false);
+            }}>{tr(idling ? 'Idling…' : 'Idle now')}</Btn>)}</>}><div className="stack">
+      <p className="small muted">{modelQuant}</p>
+      {tr(pinned?.phase === 'ready' ? <p>{tr("Idle the model now to free the graphics card and its memory for other work. It is the same as 30 minutes without use: it starts again by itself when you type or send a chat, in about half a minute.")}</p> : pinned?.phase === 'released' ? <p>{tr("The model is idle and the graphics card is free. It starts again by itself when you type or send a chat, or start it now.")}</p> : <p>{tr("The model can be idled once it is running.")}</p>)}
+      {tr(pinned?.phase === 'ready' && working.size ? <p className="small" role="note">{tr("A chat is working now. Idling stops its answer.")}</p> : null)}
+      {tr(idleError ? <p className="small" role="alert">{idleError}</p> : null)}
+    </div></Dialog>
     <Dialog open={!!renameId} compact title={tr("Rename chat")} onClose={() => setRenameId(null)} actions={<><Btn onClick={() => setRenameId(null)}>{tr("Cancel")}</Btn><Btn variant="primary" disabled={!name.trim()} onClick={() => {
                 if (renameId)
                     renameSession(renameId, name.trim());

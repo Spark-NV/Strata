@@ -6,7 +6,8 @@ import http from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createActivityLog, createModelReleaser, gameOf, releaseConfig, scanGames } from '../server/model-release.mjs';
+import { createActivityLog, createModelReleaser, gameOf, IDLE_BY_HAND, releaseConfig, scanGames } from '../server/model-release.mjs';
+import { readFileSync } from 'node:fs';
 import { createPinnedModel } from '../server/pinned-model.mjs';
 
 const STEAM = ['/home/u/.local/share/Steam/ubuntu12_32/reaper', 'SteamLaunch', 'AppId=1091500', '--', '/home/u/.local/share/Steam/steamapps/common/SteamLinuxRuntime_sniper/_v2-entry-point', '--verb=waitforexitandrun', '--', '/home/u/.local/share/Steam/steamapps/common/Proton 9.0 (Beta)/proton', 'waitforexitandrun', '/home/u/.local/share/Steam/steamapps/common/Cyberpunk 2077/bin/x64/Cyberpunk2077.exe'];
@@ -254,4 +255,39 @@ test('a stop the app did not make (systemctl, a crash) is logged as other after 
   assert.equal(activity.current().up, true, 'slow for two looks: still up');
   await r.tick();
   assert.deepEqual([activity.current().up, activity.current().reason], [false, 'other']);
+});
+
+test('"Idle now" is the same idle stop at once, logged as idle, and the next chat starts the model again', async () => {
+  let t = 1_000_000_000_000;
+  const pinned = fakePinned();
+  const activity = createActivityLog({ now: () => t });
+  const r = createModelReleaser({ pinned, idleMs: 30 * 60_000, gameRelease: false, games: () => new Map(), metrics: async () => (pinned.phase === 'ready' ? idleMetrics() : null), activity, now: () => t });
+  await r.tick();
+  t += 60_000;                                     // one minute of use, far from the 30
+  assert.equal(await r.idleNow(), 'idle');
+  assert.deepEqual(pinned.released, [['idle', IDLE_BY_HAND]]);
+  assert.deepEqual(activity.current(), { up: false, since: t, reason: 'idle', detail: IDLE_BY_HAND });
+  assert.equal(await r.idleNow(), null, 'a stopped model is left as it is');
+  for (const phase of ['starting', 'stopping', 'error']) { pinned.phase = phase; assert.equal(await r.idleNow(), null, phase); }
+  pinned.phase = 'released';
+  await pinned.ensure();                           // a chat, or typing (wakePinned -> /api/pinned/start)
+  t += 5_000;
+  await r.tick();
+  assert.equal(activity.current().up, true);
+  assert.equal(pinned.released.length, 1);
+});
+
+test('the status chip opens a menu that idles the pinned model through the same release, and typing wakes it as after any idle', () => {
+  const read = f => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+  const bar = read('src/app/Sidebar.tsx'), store = read('src/lib/store.ts'), index = read('server/index.mjs');
+  assert.match(bar, /className="enginechip"[^>]*aria-haspopup=\{pinned\?\.enabled && !imageActive \? 'dialog' : undefined\}/);
+  assert.match(bar, /if \(pinned\?\.enabled && !imageActive\) \{ setIdleError\(null\); setModelMenu\(true\); \} else go\(/, 'without a pinned model the chip still opens Models');
+  assert.match(bar, /<Dialog open=\{modelMenu && !!pinned\?\.enabled\}/);
+  assert.match(bar, /disabled=\{pinned\?\.phase !== 'ready' \|\| idling\}/, 'only a running model can be idled');
+  assert.match(bar, /pinned\?\.phase === 'released' \? <Btn variant="primary" onClick=\{\(\) => \{ startPinned\(\);/);
+  assert.match(store, /api\.post<PinnedModelState>\('\/api\/pinned\/idle'/);
+  assert.match(index, /path === '\/api\/pinned\/idle' && method === 'POST'[\s\S]{0,400}releaser\.idleNow\(\)/, 'the route calls the releaser, not a stop of its own');
+  // The released state is the one wakePinned() starts again when the person types.
+  assert.match(store, /export function wakePinned\(\) \{\n  const p = state\.pinned;\n  if \(!p\?\.enabled \|\| p\.phase !== 'released'/);
+  assert.equal(read('src/lib/store.ts').includes(`IDLE_BY_HAND = '${IDLE_BY_HAND}'`), true, 'the web UI and the host agree on the marker');
 });

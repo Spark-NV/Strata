@@ -420,6 +420,20 @@ export function wakePinned() {
   wakeAsked = p.released?.at ?? 0;
   void api.post('/api/pinned/start', {}).catch(() => {});
 }
+/** The detail of an idle stop the person asked for (server/model-release.mjs IDLE_BY_HAND). */
+export const IDLE_BY_HAND = 'by hand';
+/**
+ * "Idle now" from the status menu: the same stop as 30 minutes without use (POST /api/pinned/idle), so the GPU is free at once. The
+ * model is then released as after an idle time: typing or sending a chat starts it again (wakePinned, pinned.ensure). Returns the
+ * server's error sentence, or null.
+ */
+export async function idlePinned(): Promise<string | null> {
+  try { const p = await api.post<PinnedModelState>('/api/pinned/idle', {}); set({ pinned: p }); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
+}
+/** Starts a released pinned model now (the status menu's "Start now"): the same start as a chat's (POST /api/pinned/start). */
+export function startPinned() {
+  if (state.pinned?.enabled && state.pinned.phase === 'released') void api.post('/api/pinned/start', {}).catch(() => {});
+}
 /** Writing in an Image chat: the image model starts loading (the text model stops first), or its idle time starts again. */
 let imageWakeAsked = 0;
 export function wakeImage() {

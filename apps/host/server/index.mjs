@@ -2241,6 +2241,12 @@ async function api(req, res, path, method, url) {
   }
   // When the pinned model ran and was stopped, and why (model-release.mjs), for the Monitor.
   if (path === '/api/pinned/activity' && method === 'GET') return releaser ? json(res, 200, releaser.status()) : error(res, 404, 'No model is pinned.');
+  // "Idle now" from the status menu: the same stop as the idle time passing (model-release.mjs), so the GPU is free at once.
+  if (path === '/api/pinned/idle' && method === 'POST') {
+    if (!releaser) return error(res, 404, 'No model is pinned.');
+    if (pinned.state().phase !== 'ready') return error(res, 409, 'The model is not running, so there is nothing to idle.');
+    try { return (await releaser.idleNow()) ? json(res, 200, pinned.state()) : error(res, 409, pinned.state().error ?? 'The model could not be stopped.'); } catch (e) { return error(res, 500, e.message); }
+  }
   if (path === '/api/pinned/start' && method === 'POST') { try { await pinned.ensure(); return json(res, 200, pinned.state()); } catch (e) { return error(res, 503, e.message); } }
   // Image chats (image-model.mjs): the model's state, load and unload, a request streamed as it draws, and the images made.
   if (path === '/api/image-model' && method === 'GET') return json(res, 200, imageModel.state());
