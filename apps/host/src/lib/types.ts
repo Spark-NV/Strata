@@ -531,11 +531,15 @@ export interface RpChat {
   personaId?: string | null;
   lorebookIds?: string[];
   authorsNote?: RpAuthorsNote;
+  /** This chat's own reply style; missing or null: the one in Settings → Roleplay. */
+  replyStyle?: RpReplyStyle | null;
   vars?: Record<string, string>;
   /** Group members who do not speak on their own turn. */
   muted?: string[];
 }
 export type RpRole = 'system' | 'user' | 'assistant';
+/** How a roleplay reply is written (server/rp/prompt.mjs replyStyleText). 'any' asks for nothing. */
+export interface RpReplyStyle { length: 'any' | 'short' | 'medium' | 'long'; thoughts: 'any' | 'few' | 'none'; shape: 'any' | 'single'; guidance: string }
 export interface RpAuthorsNote { text: string; depth: number; interval: number; role: RpRole; position: 'depth' | 'top' | 'bottom' }
 export interface RpEntry {
   uid: number; comment: string; keys: string[]; secondaryKeys: string[]; selectiveLogic: 'and_any' | 'not_all' | 'not_any' | 'and_all';
@@ -559,7 +563,7 @@ export interface RpSettings {
   examplesBehavior: 'gradual' | 'always' | 'disabled'; namesBehavior: 'groups' | 'always' | 'never'; squashSystem: boolean;
   promptOrder: { id: string; enabled: boolean }[]; customPrompts: RpCustomPrompt[];
   worldInfo: { scanDepth: number; budgetPercent: number; budgetCap: number; recursive: boolean; maxRecursion: number; caseSensitive: boolean; matchWholeWords: boolean; includeNames: boolean; globalBooks: string[] };
-  authorsNote: RpAuthorsNote; contextLimit: number; responseReserve: number; autoStops: boolean; customStops: string[]; trimIncomplete: boolean;
+  authorsNote: RpAuthorsNote; replyStyle: RpReplyStyle; contextLimit: number; responseReserve: number; autoStops: boolean; customStops: string[]; trimIncomplete: boolean;
   replacements: RpReplacement[]; group: { strategy: 'natural' | 'list' | 'random' | 'manual'; allowSelfResponses: boolean; cards: 'speaker' | 'all' };
   defaultPersonaId: string | null;
 }

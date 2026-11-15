@@ -9,6 +9,7 @@ import { pushToast } from '../lib/store';
 import { loadRpLibrary, resetRpSettings, saveRpSettings, useRpLibrary } from '../lib/rp';
 import type { RpCustomPrompt, RpReplacement, RpSettings } from '../lib/types';
 import { Btn, ErrorNotice, Field, IconBtn, Select } from './ui';
+import { NO_REPLY_STYLE, ReplyStyleFields } from './RpReplyStyle';
 
 const PIECES: Record<string, string> = {
   main: 'Main prompt', formatting: 'Text format', worldInfoBefore: 'World Info (before)', personaDescription: 'Persona', charDescription: 'Character description',
@@ -52,6 +53,12 @@ export function SettingsRoleplay() {
       <p className="small muted">{tr('How a roleplay prompt is put together, as in SillyTavern. Sampling, thinking and the longest reply are in Profiles → RP. Characters, personas and lorebooks are in the Roleplay screen (the RP group’s + in the sidebar).')}</p>
     </section>
     {error ? <ErrorNotice message={error} /> : null}
+
+    <section className="settings-section">
+      <h2 className="h4" style={{ marginBottom: 6 }}>{tr('Reply style')}</h2>
+      <p className="small muted" style={{ marginBottom: 10 }}>{tr('How the characters reply in every roleplay chat. A chat can have its own in its Reply style button.')}</p>
+      <div className="st-card st-card--flush"><ReplyStyleFields value={draft.replyStyle ?? NO_REPLY_STYLE} onChange={v => patch({ replyStyle: v })} /></div>
+    </section>
 
     <section className="settings-section">
       <h2 className="h4" style={{ marginBottom: 10 }}>{tr('Prompts')}</h2>

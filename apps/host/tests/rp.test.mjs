@@ -5,7 +5,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BLANK_PNG, bookFromExternal, bookToWorldInfo, characterFromCard, characterToCard, normalizeBook, normalizeCharacter, pngWithCard, readImport } from '../server/rp/cards.mjs';
-import { activateWorldInfo, buildRpPrompt, finishReply, selectSpeaker, substitute } from '../server/rp/prompt.mjs';
+import { activateWorldInfo, buildRpPrompt, finishReply, replyStyleText, selectSpeaker, substitute } from '../server/rp/prompt.mjs';
 import { createRpStore, normalizeRpSettings } from '../server/rp/store.mjs';
 import { createMemoryStore, memoryPrompt } from '../server/memory.mjs';
 import { applyProfileToAgentBody, normalizeProfile, toolAllowed } from '../server/profiles.mjs';
@@ -147,6 +147,36 @@ test('the RP message box format: spoken, action, thought and narration in and ou
   assert.ok(r.messages[0].content.includes('((double parentheses)) is a private thought'));
 });
 
+test('the RP message box keeps every part as it was marked, whatever characters are in it (no quote or asterisk pairs across parts)', async () => {
+  const { build } = await import('esbuild');
+  const out = await build({ entryPoints: ['src/lib/rp-format.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
+  const { parseRp, serializeRp } = await import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString('base64')}`);
+  const shape = segs => segs.map(s => [s.kind, s.text.replace(/\s+/g, '')]).filter(x => x[1]).reduce((o, x) => { const l = o.at(-1); if (l && l[0] === x[0]) l[1] += x[1]; else o.push([...x]); return o; }, []);
+  // The message from the report: a thought with quotes in it, an action, spoken words, another thought.
+  const marked = [{ kind: 'thought', text: '"hmm this is interesting"' }, { kind: 'plain', text: ' ' }, { kind: 'action', text: 'reaches out' }, { kind: 'plain', text: ', ' },
+    { kind: 'speech', text: 'grab my hand' }, { kind: 'plain', text: ', ' }, { kind: 'thought', text: "i hope she grabs my hand before it's too late" }];
+  assert.deepEqual(shape(parseRp(serializeRp(marked))), shape(marked));
+  assert.equal(serializeRp(marked), '(("hmm this is interesting")) *reaches out*, "grab my hand", ((i hope she grabs my hand before it\'s too late))', 'no escapes where none are needed');
+  // Hard cases: a loose quote in narration before a thought, quotes inside speech, a star inside an action, brackets in a thought, two actions touching.
+  const hard = [{ kind: 'plain', text: 'a 5" board and ' }, { kind: 'thought', text: 'it (maybe) works' }, { kind: 'plain', text: ' then "' },
+    { kind: 'speech', text: 'say "now" please' }, { kind: 'action', text: 'counts 2*3' }, { kind: 'action', text: 'waves' }];
+  assert.deepEqual(shape(parseRp(serializeRp(hard))), shape(hard));
+  // Random messages: what goes in comes out, with typed pairs in narration read as markup (as the model reads them).
+  const words = ['hmm', 'reaches out', ',', '"', '*', '((', '))', '(', ')', '"hi"', '*waves*', 'it\'s 5" long', 'what?'];
+  // A typed backslash is only a character, in any part.
+  const slashes = [{ kind: 'plain', text: 'C:\\games\\*.sav and \\' }, { kind: 'speech', text: 'a \\ b \\' }, { kind: 'thought', text: '\\(x)\\' }, { kind: 'action', text: '\\*' }];
+  assert.deepEqual(parseRp(serializeRp(slashes)).map(x => [x.kind, x.text.trim()]), slashes.map(x => [x.kind, x.text.trim()]));
+  const kinds = ['plain', 'speech', 'action', 'thought'];
+  let seed = 7; const rnd = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  for (let n = 0; n < 3000; n++) {
+    const raw = Array.from({ length: 1 + rnd(5) }, (_, i) => ({ kind: kinds[rnd(4)], text: (i ? ' ' : '') + Array.from({ length: 1 + rnd(3) }, () => words[rnd(words.length)]).join(' ') }));
+    // The box joins neighbours of one kind into one part (RpEditor read).
+    const segs = raw.reduce((o, x) => { const l = o.at(-1); if (l && l.kind === x.kind) l.text += x.text; else o.push({ ...x }); return o; }, []);
+    const expect = segs.flatMap(s => (s.kind === 'plain' ? parseRp(s.text) : [s]));
+    assert.deepEqual(shape(parseRp(serializeRp(segs))), shape(expect), JSON.stringify(segs));
+  }
+});
+
 test('recent projects: newest first, instruction files found, AGENTS.md created from the template', async () => {
   const { createProjects } = await import('../server/projects.mjs');
   const { writeFileSync, readFileSync, mkdirSync } = await import('node:fs');
@@ -163,4 +193,24 @@ test('recent projects: newest first, instruction files found, AGENTS.md created 
   assert.ok(readFileSync(join(a, 'AGENTS.md'), 'utf8').startsWith('# a'));
   p.remove(a);
   assert.deepEqual(createProjects({ file: join(base, 'recent.json') }).list().map(x => x.name), ['b']);
+});
+
+test('reply style: nothing asked adds nothing; a style goes right after the chat as one line, a chat\'s own wins, impersonate has none', () => {
+  const history = [{ role: 'user', content: 'Hi there, how are you doing?' }];
+  const plain = buildRpPrompt({ settings, characters: [mira], speakerId: mira.id, persona: null, books: [], history, authorsNote: null, contextMax: 32768 });
+  assert.equal(plain.messages.some(m => m.content.includes('Reply style')), false, 'the default asks for nothing: the prompt is as before');
+  assert.equal(replyStyleText(normalizeRpSettings({}).replyStyle), '');
+  const style = { length: 'short', thoughts: 'none', shape: 'single', guidance: 'Let {{user}} lead.' };
+  const r = buildRpPrompt({ settings: normalizeRpSettings({ replyStyle: style }), characters: [mira], speakerId: mira.id, persona: null, books: [], history, authorsNote: null, contextMax: 32768 });
+  const at = r.messages.findIndex(m => m.content.startsWith('[Reply style:'));
+  assert.equal(at, r.messages.length - 1, 'last, after the chat');
+  assert.match(r.messages[at].content, /Keep Mira's reply short/);
+  assert.match(r.messages[at].content, /one natural turn/);
+  assert.match(r.messages[at].content, /Do not write Mira's inner thoughts/);
+  assert.match(r.messages[at].content, /Let User lead\.\]$/);
+  const own = buildRpPrompt({ settings: normalizeRpSettings({ replyStyle: style }), characters: [mira], speakerId: mira.id, persona: null, books: [], history, authorsNote: null, replyStyle: { length: 'long', thoughts: 'any', shape: 'any', guidance: '' }, contextMax: 32768 });
+  assert.match(own.messages.at(-1).content, /^\[Reply style: Write a full reply of several paragraphs/);
+  const imp = buildRpPrompt({ settings: normalizeRpSettings({ replyStyle: style }), characters: [mira], speakerId: mira.id, persona: null, books: [], history, authorsNote: null, mode: 'impersonate', contextMax: 32768 });
+  assert.equal(imp.messages.some(m => m.content.startsWith('[Reply style:')), false);
+  assert.deepEqual(normalizeRpSettings({ replyStyle: { length: 'huge', thoughts: 'few', shape: 'x' } }).replyStyle, { length: 'any', thoughts: 'few', shape: 'any', guidance: '' });
 });

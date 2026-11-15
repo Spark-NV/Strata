@@ -8,6 +8,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { parseRp, RP_KINDS, serializeRp, type RpKind, type RpSegment } from '../lib/rp-format';
 
 const ZW = '​';
+// Marks where the caret was while the box is redrawn (a private-use character no one types).
+const CARET = '\uE000';
 
 function render(root: HTMLElement, value: string) {
   const nodes: Node[] = [];
@@ -38,6 +40,26 @@ function read(root: HTMLElement): RpSegment[] {
   const last = out[out.length - 1];
   if (last) last.text = last.text.replace(/\n$/, '');
   return out.filter(s => s.text);
+}
+
+/** The parts the box shows, as the model will read them: typed pairs ("hi", *waves*) are styled, nothing else changes. */
+const shape = (segs: RpSegment[]) => JSON.stringify(segs.map(x => [x.kind, x.text.replace(/\s+/g, '')]).filter(x => x[1]));
+
+/** Redraw the box from its own text, so it shows exactly what will be sent; the caret stays where it was. Returns the value. */
+function redraw(root: HTMLElement): string {
+  const sel = window.getSelection();
+  if (sel?.rangeCount && root.contains(sel.anchorNode)) { const r = sel.getRangeAt(0).cloneRange(); r.collapse(false); r.insertNode(document.createTextNode(CARET)); }
+  render(root, serializeRp(read(root)));
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const at = (n.textContent ?? '').indexOf(CARET);
+    if (at < 0) continue;
+    n.textContent = (n.textContent ?? '').replace(CARET, '');
+    const r = document.createRange(); r.setStart(n, at); r.collapse(true);
+    sel?.removeAllRanges(); sel?.addRange(r);
+    break;
+  }
+  return serializeRp(read(root));
 }
 
 /** Characters of text (a <br> counts one) before a point in the editor. */
@@ -88,14 +110,11 @@ export function RpEditor({ value, onChange, onSubmit, placeholder, autoFocus = f
   }, []);
   const emit = () => {
     const el = root.current; if (!el) return;
-    // The browser may carry formatting of its own into new text (<font>, <i>, a <div> per line): redraw from the text, caret kept.
-    if (el.querySelector('font, i, b, em, strong, u, div, p, span:not([data-k])')) {
-      const sel = window.getSelection();
-      const at = sel?.anchorNode && el.contains(sel.anchorNode) ? offsetOf(el, sel.anchorNode, sel.anchorOffset) : Number.MAX_SAFE_INTEGER;
-      render(el, serializeRp(read(el)));
-      placeCaret(el, at);
-    }
-    const v = serializeRp(read(el)); last.current = v; if (!v && el.childNodes.length && !el.textContent?.replace(/​/g, '')) el.replaceChildren(); onChange(v); };
+    // Redraw from the text, caret kept, when the browser carried formatting of its own into new text (<font>, <i>, a <div> per line), or
+    // when what is shown is not what will be sent: a pair just typed ("hi", *waves*) becomes Spoken or Action at once.
+    const segs = read(el);
+    const v0 = serializeRp(segs);
+    const v = el.querySelector('font, i, b, em, strong, u, div, p, span:not([data-k])') || shape(parseRp(v0)) !== shape(segs) ? redraw(el) : v0; last.current = v; if (!v && el.childNodes.length && !el.textContent?.replace(/​/g, '')) el.replaceChildren(); onChange(v); };
 
   function apply(kind: RpKind) {
     const el = root.current, sel = window.getSelection();
@@ -104,18 +123,29 @@ export function RpEditor({ value, onChange, onSubmit, placeholder, autoFocus = f
     if (!sel || !sel.rangeCount || !el.contains(sel.anchorNode)) { placeCaret(el, Number.MAX_SAFE_INTEGER); }
     const range = window.getSelection()!.getRangeAt(0);
     if (range.collapsed) {
-      // No selection: what is typed next has this style.
+      // No selection: what is typed next has this style. Inside a styled part, that part is split at the caret, so the new style starts
+      // as a part of its own instead of inside the other one (where it would look like the outer style).
       const span = document.createElement('span');
       span.dataset.k = kind; if (kind !== 'plain') span.className = `rp-${kind}`;
       const t = document.createTextNode(ZW); span.append(t);
-      range.insertNode(span);
+      let outer: Node | null = range.startContainer;
+      while (outer && outer.parentNode !== el) outer = outer.parentNode;
+      if (outer instanceof HTMLElement && outer.dataset.k) {
+        const tail = document.createRange(); tail.setStart(range.startContainer, range.startOffset); tail.setEndAfter(outer);
+        const rest = tail.extractContents();
+        const empty = (n: Node | null) => !(n?.textContent ?? '').replace(/​/g, '') && !(n instanceof HTMLElement && n.querySelector('br'));
+        outer.after(span);
+        if (!empty(rest)) span.after(rest);
+        if (empty(outer)) outer.remove();
+      } else range.insertNode(span);
       const r = document.createRange(); r.setStart(t, 1); r.collapse(true);
       const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
       setActive(kind);
       return;
     }
-    // A selection: restyle exactly that text, then redraw so styles never nest, and keep the caret after it.
-    const text = range.toString().replace(/​/g, '');
+    // A selection: restyle exactly that text (its line breaks too), then redraw so styles never nest, and keep the caret after it.
+    const box = document.createElement('div'); box.append(range.cloneContents());
+    const text = read(box).map(x => x.text).join('');
     range.deleteContents();
     const span = document.createElement('span');
     span.dataset.k = kind;

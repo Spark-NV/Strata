@@ -7,7 +7,8 @@ import { tr } from '../lib/i18n';
 import { memo, useEffect, useRef, useState } from 'react';
 import { branchFrom, useStore } from '../lib/store';
 import { avatarUrl, rpDeleteMessage, rpDeleteSwipe, rpEditMessage, rpGenerate, rpPreview, rpSwipe, rpToggleHidden, setRpChat, useRpLibrary } from '../lib/rp';
-import type { ChatMessage, RpAuthorsNote, RpCharacter, Session } from '../lib/types';
+import type { ChatMessage, RpAuthorsNote, RpCharacter, RpReplyStyle, Session } from '../lib/types';
+import { NO_REPLY_STYLE, ReplyStyleFields, replyStyleSet } from './RpReplyStyle';
 import { RpEditor, RpText } from './RpEditor';
 import { ReasoningBlock } from './ReasoningBlock';
 import { CopyBtn } from './CopyBtn';
@@ -80,6 +81,17 @@ function RpMessageView({ m, session, isLast }: { m: ChatMessage; session: Sessio
   </div>;
 }
 export const RpMessage = memo(RpMessageView);
+
+function ReplyStyleDialog({ session, onClose }: { session: Session; onClose: () => void }) {
+  const lib = useRpLibrary();
+  const [own, setOwn] = useState(!!session.rp?.replyStyle);
+  const [style, setStyle] = useState<RpReplyStyle>(session.rp?.replyStyle ?? lib?.settings.replyStyle ?? NO_REPLY_STYLE);
+  return <Dialog open title={tr('Reply style')} onClose={onClose} actions={<><Btn onClick={onClose}>{tr('Cancel')}</Btn><Btn variant="primary" onClick={() => { setRpChat(session.id, { replyStyle: own ? style : null }); onClose(); }}>{tr('Save')}</Btn></>}>
+    <p className="small muted" style={{ marginBottom: 10 }}>{tr('How the characters reply in this chat. The next reply uses it.')}</p>
+    <label className="row small" style={{ gap: 6, marginBottom: 10 }}><input type="checkbox" checked={!own} onChange={e => setOwn(!e.target.checked)} />{tr('Use the reply style from Settings → Roleplay')}</label>
+    {own ? <div className="st-card st-card--flush"><ReplyStyleFields value={style} onChange={setStyle} /></div> : null}
+  </Dialog>;
+}
 
 function AuthorsNoteDialog({ session, onClose }: { session: Session; onClose: () => void }) {
   const lib = useRpLibrary();
@@ -154,7 +166,7 @@ function CastDialog({ session, onClose }: { session: Session; onClose: () => voi
 export function RpBar({ session }: { session: Session }) {
   const lib = useRpLibrary();
   const streaming = useStore(s => s.streaming);
-  const [dialog, setDialog] = useState<'note' | 'inspect' | 'books' | 'cast' | null>(null);
+  const [dialog, setDialog] = useState<'note' | 'style' | 'inspect' | 'books' | 'cast' | null>(null);
   if (!session.rp) return null;
   const cast = session.rp.characterIds.map(id => lib?.characters.find(c => c.id === id)).filter((c): c is RpCharacter => !!c);
   const group = cast.length > 1;
@@ -173,6 +185,7 @@ export function RpBar({ session }: { session: Session }) {
     <div className="rp-bar__tools">
       <Select value={personaId || '__default'} onChange={v => setRpChat(session.id, { personaId: v === '__default' ? null : v })} ariaLabel={tr('Your persona')} translateLabels={false}
         options={[{ value: '__default', label: `${tr('Persona')}: ${lib?.settings.userName ?? 'User'}` }, ...(lib?.personas ?? []).map(p => ({ value: p.id, label: `${tr('Persona')}: ${p.name}` }))]} />
+      <Btn size="sm" active={replyStyleSet(session.rp.replyStyle)} title={tr('How the characters reply in this chat')} onClick={() => setDialog('style')}>{tr('Reply style')}</Btn>
       <Btn size="sm" active={noteOn} onClick={() => setDialog('note')}>{tr("Author's note")}</Btn>
       <Btn size="sm" active={books > 0} onClick={() => setDialog('books')}>{books ? tr('Lorebooks ({0})', [books]) : tr('Lorebooks')}</Btn>
       <Btn size="sm" disabled={streaming} title={tr('The model writes your next message into the box')} onClick={() => void rpGenerate(session.id, 'impersonate')}>{tr('Impersonate')}</Btn>
@@ -180,6 +193,7 @@ export function RpBar({ session }: { session: Session }) {
       {group ? <Btn size="sm" disabled={streaming} title={tr('The next character speaks without a message from you')} onClick={() => void rpGenerate(session.id, 'normal')}>{tr('Next speaker')}</Btn> : null}
       <IconBtn name="search" title={tr('Prompt inspector')} onClick={() => setDialog('inspect')} size={16} />
     </div>
+    {dialog === 'style' ? <ReplyStyleDialog session={session} onClose={() => setDialog(null)} /> : null}
     {dialog === 'note' ? <AuthorsNoteDialog session={session} onClose={() => setDialog(null)} /> : null}
     {dialog === 'inspect' ? <InspectorDialog session={session} onClose={() => setDialog(null)} /> : null}
     {dialog === 'books' ? <LorebooksDialog session={session} onClose={() => setDialog(null)} /> : null}

@@ -19,7 +19,7 @@
 import { json, error, readBody } from '../util.mjs';
 import { BLANK_PNG, bookToWorldInfo, characterToCard, isPng, pngWithCard, readImport } from './cards.mjs';
 import { buildRpPrompt, finishReply, selectSpeaker } from './prompt.mjs';
-import { normalizeAuthorsNote } from './store.mjs';
+import { normalizeAuthorsNote, normalizeReplyStyle } from './store.mjs';
 import { isPrivateHost } from '../agent/llm-shape.mjs';
 import { offlineModelRefusal } from '../profiles.mjs';
 import { createRpRecorder, rpHistory, validMessageId } from '../turn-record.mjs';
@@ -84,7 +84,7 @@ export function createRpRoutes({ rp, modelProviders, pinned, profileStore, profi
     const books = [...bookIds].map(id => rp.lorebooks.get(id)).filter(Boolean);
     for (const c of characters) if (c.book?.entries.length) books.push({ ...c.book, id: `char-${c.id}`, name: c.book.name || `${c.name}'s lorebook` });
     const muted = Array.isArray(chat.muted) ? chat.muted.map(String) : [];
-    return { settings, characters, persona, books, muted, authorsNote: normalizeAuthorsNote(chat.authorsNote ?? settings.authorsNote), vars: chat.vars && typeof chat.vars === 'object' ? { ...chat.vars } : {} };
+    return { settings, characters, persona, books, muted, authorsNote: normalizeAuthorsNote(chat.authorsNote ?? settings.authorsNote), replyStyle: chat.replyStyle ? normalizeReplyStyle(chat.replyStyle) : null, vars: chat.vars && typeof chat.vars === 'object' ? { ...chat.vars } : {} };
   }
 
   function history(raw) {
@@ -106,7 +106,7 @@ export function createRpRoutes({ rp, modelProviders, pinned, profileStore, profi
     const { connection, model } = modelProviders.resolve(selection);
     // Offline (the chat's switch): roleplay has no tools, so the one way out is a model on the internet; that is refused.
     if (body.offline === true && !isPrivateHost(connection.baseUrl)) throw Object.assign(new Error(offlineModelRefusal(model.name || connection.name)), { code: 'offline-model' });
-    const built = buildRpPrompt({ settings: c.settings, characters: c.characters, speakerId, persona: c.persona, books: c.books, history: msgs, authorsNote: c.authorsNote, mode, contextMax: model.contextMax || 32768, vars: c.vars, chatId: String(body.sessionId ?? ''), model: model.name });
+    const built = buildRpPrompt({ settings: c.settings, characters: c.characters, speakerId, persona: c.persona, books: c.books, history: msgs, authorsNote: c.authorsNote, replyStyle: c.replyStyle, mode, contextMax: model.contextMax || 32768, vars: c.vars, chatId: String(body.sessionId ?? ''), model: model.name });
     return { ...built, selection, model, settings: c.settings, mode };
   }
 

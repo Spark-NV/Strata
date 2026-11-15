@@ -222,6 +222,23 @@ function exampleBlocks(text) {
   return String(text ?? '').split(/<START>/i).map(b => b.trim()).filter(Boolean);
 }
 
+/**
+ * The reply style as one instruction, or '' when nothing is asked for. It goes right after the chat, where the model reads it last.
+ * {{char}} and {{user}} are filled in by the caller.
+ */
+export function replyStyleText(style) {
+  if (!style) return '';
+  const lines = [];
+  if (style.length === 'short') lines.push("Keep {{char}}'s reply short: one paragraph of two to four sentences.");
+  else if (style.length === 'medium') lines.push("Keep {{char}}'s reply to one or two short paragraphs.");
+  else if (style.length === 'long') lines.push("Write a full reply of several paragraphs, rich in detail.");
+  if (style.shape === 'single') lines.push("Write {{char}}'s reply as one natural turn: what {{char}} says and does, once, then stop so {{user}} can answer. Do not go back and forth between speech, thoughts and more speech, and do not answer for {{char}} several times in one reply.");
+  if (style.thoughts === 'none') lines.push("Do not write {{char}}'s inner thoughts, and use no ((double parentheses)). Show feelings through words, voice and actions.");
+  else if (style.thoughts === 'few') lines.push("Write at most one short inner thought for {{char}}, in ((double parentheses)), and only when it adds something.");
+  if (style.guidance?.trim()) lines.push(style.guidance.trim());
+  return lines.length ? `[Reply style: ${lines.join(' ')}]` : '';
+}
+
 /** A reply as the person wants it: replacements applied, and cut back to its last full sentence when asked. */
 export function finishReply(text, settings, on = 'output') {
   let out = String(text ?? '');
@@ -250,7 +267,7 @@ export function finishReply(text, settings, on = 'output') {
  * @param {number} a.contextMax   the model's window in tokens
  * @param {Record<string,string>} [a.vars]
  */
-export function buildRpPrompt({ settings, characters, speakerId, persona, books, history, authorsNote, mode = 'normal', contextMax = 32768, vars = {}, chatId = '', model = '', now = Date.now(), rand = Math.random }) {
+export function buildRpPrompt({ settings, characters, speakerId, persona, books, history, authorsNote, replyStyle = null, mode = 'normal', contextMax = 32768, vars = {}, chatId = '', model = '', now = Date.now(), rand = Math.random }) {
   const s = settings;
   const isGroup = characters.length > 1;
   const speaker = characters.find(c => c.id === speakerId) ?? characters[0] ?? { id: null, name: 'Assistant', description: '', personality: '', scenario: '', exampleDialogues: '', systemPrompt: '', postHistoryInstructions: '', depthPrompt: { text: '' } };
@@ -327,6 +344,9 @@ export function buildRpPrompt({ settings, characters, speakerId, persona, books,
   if (mode === 'continue' && s.continuePrompt.trim()) ending.push({ role: 'system', content: sub(s.continuePrompt), piece: 'Continue' });
   else if (mode === 'impersonate' && s.impersonationPrompt.trim()) ending.push({ role: 'system', content: sub(s.impersonationPrompt), piece: 'Impersonate' });
   else if (isGroup && s.groupNudgePrompt.trim()) ending.push({ role: 'system', content: sub(s.groupNudgePrompt), piece: 'Group nudge' });
+  // The reply style (this chat's own, else the settings'), for {{char}}'s replies; impersonate writes as {{user}} and has its own prompt.
+  const style = mode === 'impersonate' ? '' : replyStyleText(replyStyle ?? s.replyStyle);
+  if (style) ending.unshift({ role: 'system', content: sub(style), piece: 'Reply style' });
 
   // In-chat injections at a depth.
   const injections = [];

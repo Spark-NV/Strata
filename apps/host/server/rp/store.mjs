@@ -56,6 +56,9 @@ export const DEFAULT_RP_SETTINGS = Object.freeze({
   customPrompts: [],                // {id, name, role, content, enabled, depth: null (in the order) | n (inside the chat at depth n)}
   worldInfo: { scanDepth: 4, budgetPercent: 25, budgetCap: 16384, recursive: true, maxRecursion: 3, caseSensitive: false, matchWholeWords: true, includeNames: true, globalBooks: [] },
   authorsNote: { text: '', depth: 4, interval: 1, role: 'system', position: 'depth' },
+  // How long a reply is, how many inner thoughts it has, one turn or several, and the person's own words (prompt.mjs replyStyleText).
+  // The default asks for nothing, so replies are as they always were until the person picks something.
+  replyStyle: { length: 'any', thoughts: 'any', shape: 'any', guidance: '' },
   contextLimit: 0,                  // 0: the model's own window
   responseReserve: 8192,            // tokens kept free for the reply (and its thinking)
   autoStops: true,                  // stop when the model starts writing "\n{{user}}:" (or another member's name in a group)
@@ -106,6 +109,7 @@ export function normalizeRpSettings(raw = {}) {
       globalBooks: (Array.isArray(wi.globalBooks) ? wi.globalBooks : []).filter(x => typeof x === 'string').slice(0, 100),
     },
     authorsNote: normalizeAuthorsNote(an),
+    replyStyle: normalizeReplyStyle(s.replyStyle),
     contextLimit: num(s.contextLimit, 0, 0, 10_000_000) | 0,
     responseReserve: num(s.responseReserve, d.responseReserve, 256, 1_000_000) | 0,
     autoStops: bool(s.autoStops, true),
@@ -118,6 +122,13 @@ export function normalizeRpSettings(raw = {}) {
     group: { strategy: pick(g.strategy, ['natural', 'list', 'random', 'manual'], 'natural'), allowSelfResponses: bool(g.allowSelfResponses, false), cards: pick(g.cards, ['speaker', 'all'], 'speaker') },
     defaultPersonaId: typeof s.defaultPersonaId === 'string' ? s.defaultPersonaId : null,
   };
+}
+
+/** A reply style (settings, or one chat's own): each choice is 'any' unless set. */
+export function normalizeReplyStyle(r = {}) {
+  const o = r && typeof r === 'object' ? r : {};
+  return { length: pick(o.length, ['any', 'short', 'medium', 'long'], 'any'), thoughts: pick(o.thoughts, ['any', 'none', 'few'], 'any'),
+    shape: pick(o.shape, ['any', 'single'], 'any'), guidance: str(o.guidance, 4000) };
 }
 
 export function normalizeAuthorsNote(an = {}) {
