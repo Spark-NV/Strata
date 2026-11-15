@@ -1,0 +1,34 @@
+[strata] sampling defaults from the config: temperature=1.0, top_p=0.95, top_k=20, min_p=0.0
+the vision encoder starts with the first picture (elastic) ...
+loading the model (the first start takes a minute or two) ...
+[strata] starting the engine: reading the model's weights ...
+[strata] engine priority: nice +5 (this PC has built-in Radeon graphics that usually draw the desktop; STRATA_ENGINE_NICE=0 turns it off)
+[strata] loading the most-used experts into RAM (up to 64 GiB; the rest are read from the model files as needed) and locking part of them for the GPU.
+         YOUR PC CAN BE SLOW OR STOP RESPONDING FOR 1-3 MINUTES NOW - this is normal.
+         Please wait and don't close this window; the server says when it is ready.
+[strata] filling the GPU's expert cache (8653 experts, 19.74 GiB of VRAM) ...
+[strata] almost ready ...
+[strata] still starting (34 s) - please wait ...
+[strata] still starting (54 s) - please wait ...
+[strata] thinking budget: 49152 tokens (reasoning_budget_tokens; a request can set its own)
+[strata] images: the image encoder starts with the first picture and stops after 120 s without one
+ready: http://127.0.0.1:8090/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 260000 tokens, images on)
+       open http://127.0.0.1:8090/ in a browser to chat; close this window to stop the model
+[strata] reading the prompt: 12,892 of 12,899 tokens, 3 s so far
+[strata] done: 5 tokens in 3 s (36.6 tok/s) (stop, cancel=False), expert cache 48.2% hit (+1.9% of the routed experts over PCIe)
+[strata] reading the prompt: 12,891 of 12,898 tokens, 2 s so far
+[strata] done: 5 tokens in 3 s (37.3 tok/s) (stop, cancel=False), expert cache 58.5% hit (+2.2% of the routed experts over PCIe)
+[strata] reading the prompt: 12,892 of 12,899 tokens, 2 s so far
+[strata] done: 5 tokens in 3 s (57.0 tok/s) (stop, cancel=False), expert cache 69.3% hit (+1.3% of the routed experts over PCIe)
+[strata] reading the prompt: 32,768 of 52,540 tokens, 5 s so far
+[strata] reading the prompt: 52,533 of 52,540 tokens, 8 s so far
+[strata] done: 5 tokens in 8 s (52.1 tok/s) (stop, cancel=False), expert cache 76.6% hit (+0.5% of the routed experts over PCIe)
+[strata] reading the prompt: 32,768 of 52,538 tokens, 5 s so far
+[strata] reading the prompt: 52,531 of 52,538 tokens, 8 s so far
+[strata] done: 5 tokens in 8 s (60.0 tok/s) (stop, cancel=False), expert cache 83.7% hit (+0.3% of the routed experts over PCIe)
+[strata] reading the prompt: 32,768 of 52,540 tokens, 5 s so far
+[strata] reading the prompt: 52,533 of 52,540 tokens, 8 s so far
+[strata] done: 5 tokens in 8 s (82.6 tok/s) (stop, cancel=False), expert cache 88.4% hit (+0.2% of the routed experts over PCIe)
+
+[strata] stopping (Ctrl+C again to end the engine at once) ...
+[strata] stopped

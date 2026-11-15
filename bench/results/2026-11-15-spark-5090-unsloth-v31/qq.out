@@ -1,0 +1,16 @@
+engine: /home/spark/Apps/Strata/engine/strata --serve --pack /home/spark/Apps/Strata/packs/unsloth-v31-iq4_xs --native /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS.gguf --ple-gguf /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS.gguf --ple-io direct --embd-gguf /home/spark/Apps/MODELS/token-embd-bf16-official.gguf --expert-profile /home/spark/Apps/Strata/data/expert-profile-unsloth-v31-learned.bin --mmap-experts --resident-budget-gib 64 --spec 4 --spec-min-p 0.7 --mtp /home/spark/Apps/Strata/mtp/rt --vram-reserve-mib 1152 --vram-elastic-hold-mib 2816 --expert-cache 1500 --adapt-every 100000 --pcie-frac 0 --suffix-draft 0 --prompt-cache 0 --kv fp16 --max-context 1512 --short-read 1064 --prefill 512
+code: 999 positions, 19.9 s
+docs: 999 positions, 18.2 s
+english: 999 positions, 18.1 s
+multilingual: 999 positions, 20.4 s
+agent: 999 positions, 18.6 s
+$P tools/quant_quality.py run --config personal/rtx5090-unsloth-v31-iq4xs.jso  755.05s user 42.13s system 539% cpu 2:27.67 total
+engine: /home/spark/Apps/Strata/engine/strata --serve --pack /home/spark/Apps/Strata/packs/orca-iq4_xs --native /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Uncensored-IQ4_XS-00001-of-00003.gguf --ple-gguf /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Uncensored-IQ4_XS-00001-of-00003.gguf --ple-io mmap --embd-gguf /home/spark/Apps/MODELS/token-embd-bf16-uncensored.gguf --expert-profile /home/spark/Apps/Strata/data/expert-profile-iq4_xs-learned.bin --mmap-experts --resident-budget-gib 64 --spec 4 --spec-min-p 0.7 --mtp /home/spark/Apps/Strata/mtp/rt --vram-reserve-mib 1024 --vram-elastic-hold-mib 2816 --expert-cache 1500 --adapt-every 100000 --pcie-frac 0 --suffix-draft 0 --prompt-cache 0 --kv fp16 --max-context 1512 --short-read 1064 --prefill 512
+code: 999 positions, 19.5 s
+docs: 999 positions, 18.7 s
+english: 999 positions, 14.9 s
+multilingual: 999 positions, 19.0 s
+agent: 999 positions, 19.3 s
+$P tools/quant_quality.py run --config personal/rtx5090-orca-iq4xs.json --out  731.25s user 32.74s system 538% cpu 2:21.78 total
+(eval):1: no such file or directory: .venv/bin/python
+done

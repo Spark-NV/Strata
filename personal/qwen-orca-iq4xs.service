@@ -1,9 +1,9 @@
 [Unit]
-Description=Qwen Orca IQ4_XS - Strata Flash Next
+Description=Qwen3.8 Flash Next Unsloth V3.1 UD-IQ4_XS - Strata
 
 [Service]
 Type=simple
 WorkingDirectory=/home/spark/Apps/Strata
-ExecStart=/home/spark/Apps/Strata/.venv/bin/python -m serve.server --engine strata --config /home/spark/Apps/Strata/personal/rtx5090-orca-iq4xs.json --port 8082
+ExecStart=/home/spark/Apps/Strata/.venv/bin/python -m serve.server --engine strata --config /home/spark/Apps/Strata/personal/rtx5090-unsloth-v31-iq4xs.json --port 8082
 TimeoutStopSec=30
 KillMode=control-group

@@ -1,0 +1,26 @@
+[q5-base] up in 60s
+seeded: total decode 70.9 tok/s over 16 prompts (4096 tokens); story 72.1, code 61.5; texts dacb049836e573fa
+per-prompt: 3637fb f90729 a1fe8e a5dbd1 e25ece ef2cef 24bde8 574c83 ea00be 5838ce c8e903 50be31 82ecea dd86e8 48f80c 26c2b3 5078a1 36cf26
+[q5-base] decode timing medians over 16 requests: {'ms/window': 30.735, 'tok/win': 2.18, 'verify': 29.89, 'reach': 5.625, 'layerhost': 23.885, 'stage': 0.01, 'commit': 0.01, 'draft': 0.865, 'ajoin': 0.0, 'other': 0.02, 'cpuexp': 8.42}
+[q5-base] pool: {'gu': 15.095, 'q': 0.074, 'down': 8.4, 'GBs': 43.7}
+[q5-l2] up in 60s
+seeded: total decode 67.9 tok/s over 16 prompts (4096 tokens); story 69.4, code 57.0; texts 13fed39117fc1890
+per-prompt: 7cc8a8 f649be adf585 0b19f4 4d7261 14a84a 133dae 574c83 a0bd6a f39d46 1c3357 571091 e3bb19 8c0432 844b21 55a4d3 342b7b 76fc0d
+[q5-l2] decode timing medians over 16 requests: {'ms/window': 30.815, 'tok/win': 2.22, 'verify': 29.96, 'reach': 5.55, 'layerhost': 23.965, 'stage': 0.02, 'commit': 0.02, 'draft': 0.84, 'ajoin': 0.0, 'other': 0.02, 'cpuexp': 8.485}
+[q5-l2] pool: {'gu': 14.965, 'q': 0.075, 'down': 8.625, 'GBs': 42.55}
+[q5-base2] up in 62s
+seeded: total decode 60.7 tok/s over 16 prompts (4096 tokens); story 63.7, code 45.9; texts 8ffd04dc9c558c0b
+per-prompt: 7cc8a8 f649be 8c1bce 4bbf5c 4d7261 f1a96a 133dae 574c83 a0bd6a f39d46 1c3357 a35e79 3071ab 8c0432 844b21 55a4d3 342b7b 76fc0d
+[q5-base2] decode timing medians over 16 requests: {'ms/window': 35.095, 'tok/win': 2.16, 'verify': 34.205, 'reach': 5.515, 'layerhost': 28.19, 'stage': 0.01, 'commit': 0.02, 'draft': 0.86, 'ajoin': 0.0, 'other': 0.02, 'cpuexp': 8.4}
+[q5-base2] pool: {'gu': 18.174, 'q': 0.095, 'down': 9.665, 'GBs': 33.1}
+[q5-l22] up in 64s
+seeded: total decode 66.4 tok/s over 16 prompts (4096 tokens); story 67.7, code 57.4; texts ad36956beac74a74
+per-prompt: 19fd2f 256700 8ad58b dd03bb bca99e 7ffbff f90450 b36711 728122 4a2e2f 1f4dbd c30179 137a6b da9cd3 7d9b4c 7a228d 046f6e a5ad46
+[q5-l22] decode timing medians over 16 requests: {'ms/window': 31.725, 'tok/win': 2.115, 'verify': 30.88, 'reach': 9.4, 'layerhost': 20.335, 'stage': 0.01, 'commit': 0.01, 'draft': 0.815, 'ajoin': 0.0, 'other': 0.02, 'cpuexp': 5.355}
+[q5-l22] pool: {'gu': 13.343, 'q': 0.058, 'down': 6.776, 'GBs': 29.15}
+[q5-avx] up in 56s
+seeded: total decode 81.7 tok/s over 16 prompts (4096 tokens); story 97.2, code 78.8; texts 4e1bee68d28283fd
+per-prompt: d7658b 62f481 6fa020 05e9fb 6426db 1a18c4 4232e6 574c83 3eb6f2 39b24c e83233 90b8f8 39f508 01b5df 4c72df a5ee70 807f10 654218
+[q5-avx] decode timing medians over 16 requests: {'ms/window': 26.7, 'tok/win': 2.185, 'verify': 25.82, 'reach': 5.985, 'layerhost': 19.245, 'stage': 0.07, 'commit': 0.01, 'draft': 0.845, 'ajoin': 0.0, 'other': 0.02, 'cpuexp': 5.345}
+[q5-avx] pool: {'gu': 12.028, 'q': 0.061, 'down': 6.49, 'GBs': 34.5}
+done

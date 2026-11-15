@@ -1,0 +1,7 @@
+[old-ref] up in 52s
+story: decode median 189.4 mean 189.8 all [191.9, 186.8, 185.9, 194.7] out [256, 256, 256, 256, 256, 256] acc 0.609
+code: decode median 198.0 mean 193.7 all [207.5, 210.1, 188.5, 168.5] out [256, 256, 256, 256, 256, 256] acc 0.782
+words: decode median 61.5 mean 63.4 all [101.7, 21.3, 110.6, 19.9] out [60, 5, 74, 6, 5, 6] acc 0.520
+mixed: total decode 137.2 tok/s over 14 prompts (3545 tokens), median 135.7, acc 0.721
+[old-ref] decode timing medians over 32 requests: {'ms/window': 14.38, 'tok/win': 2.06, 'verify': 11.255, 'reach': 5.505, 'layerhost': 5.315, 'stage': 0.11, 'commit': 0.03, 'draft': 1.165, 'ajoin': 0.35, 'other': 0.01, 'cpuexp': 1.705}
+[old-ref] pool: {'gu': 3.173, 'q': 0.013, 'down': 1.66, 'GBs': 43.75}

@@ -1,0 +1,45 @@
+[q7-l216] up in 56s
+seeded: total decode 92.5 tok/s over 16 prompts (4094 tokens); story 86.0, code 90.5; texts 29ffb4f68a1207be
+per-prompt: 486444 0b9e60 1e2c75 f51661 48dfb7 9b09dc 11a952 343c2a 773b49 525877 6de67e c90dde a29648 3134aa d0879e e555e9 7918a5 80c933
+[q7-l216] decode timing medians over 16 requests: {'ms/window': 21.31, 'tok/win': 2.135, 'verify': 20.48, 'reach': 6.67, 'layerhost': 13.335, 'stage': 0.01, 'commit': 0.01, 'draft': 0.825, 'ajoin': 0.0, 'other': 0.01, 'cpuexp': 4.115}
+[q7-l216] pool: {'gu': 8.256, 'q': 0.042, 'down': 4.749, 'GBs': 37.45}
+[q7-base] up in 52s
+seeded: total decode 92.0 tok/s over 16 prompts (4076 tokens); story 83.7, code 90.0; texts 7dff5a4768aeec60
+per-prompt: 51d90b 8ed02e 34b815 03cadb af765e 0f8fd8 763d35 343c2a ac7729 45a7c4 07ad2c fa21bc 813b53 e3b92b 79ec35 4aec47 9ccfe6 843b28
+[q7-base] decode timing medians over 16 requests: {'ms/window': 21.225, 'tok/win': 2.15, 'verify': 20.395, 'reach': 6.9, 'layerhost': 13.04, 'stage': 0.07, 'commit': 0.01, 'draft': 0.84, 'ajoin': 0.0, 'other': 0.01, 'cpuexp': 3.625}
+[q7-base] pool: {'gu': 7.728, 'q': 0.037, 'down': 4.776, 'GBs': 34.25}
+[p7-base] up in 54s
+p8k: prompt tok/s [4844.9, 5098.4, 5050.9] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+p32k: prompt tok/s [6553.9, 6419.1, 6380.4] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+strata prefill timing: 12892 tokens, GPU timeline 2425 ms, wall 2440 ms, host staging 155 ms: embed+steps 8 (0.3%) hc read 1 (0.0%) gdn 281 (11.6%) qsa proj 110 (4.6%) qsa indexer 0 (0.0%) qsa select 32 (1.3%) qsa attn 95 (3.9%) router+shared 49 (2.0%) host grouping 14 (0.6%) gather 24 (1.0%) wait copy 94 (3.9%) dequant 296 (12.2%) gemm gate/up 513 (21.2%) gemm down 264 (10.9%) combine 49 (2.0%) p
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 1 ms, waiting for each chunk 9 ms, after each chunk (the draft layer, progress) 14 ms, PLE 2 ms
+strata prefill timing: 12891 tokens, GPU timeline 2158 ms, wall 2173 ms, host staging 308 ms: embed+steps 8 (0.4%) hc read 1 (0.0%) gdn 204 (9.4%) qsa proj 111 (5.1%) qsa indexer 0 (0.0%) qsa select 32 (1.5%) qsa attn 95 (4.4%) router+shared 46 (2.1%) host grouping 15 (0.7%) gather 24 (1.1%) wait copy 93 (4.3%) dequant 298 (13.8%) gemm gate/up 470 (21.8%) gemm down 228 (10.5%) combine 47 (2.2%) pl
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 1 ms, waiting for each chunk 9 ms, after each chunk (the draft layer, progress) 14 ms, PLE 6 ms
+strata prefill timing: 12892 tokens, GPU timeline 2163 ms, wall 2177 ms, host staging 473 ms: embed+steps 8 (0.4%) hc read 1 (0.1%) gdn 203 (9.4%) qsa proj 110 (5.1%) qsa indexer 0 (0.0%) qsa select 31 (1.5%) qsa attn 95 (4.4%) router+shared 47 (2.2%) host grouping 21 (1.0%) gather 24 (1.1%) wait copy 94 (4.4%) dequant 297 (13.7%) gemm gate/up 470 (21.7%) gemm down 224 (10.4%) combine 48 (2.2%) pl
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 8 ms, after each chunk (the draft layer, progress) 14 ms, PLE 22 ms
+strata prefill timing: 52532 tokens, GPU timeline 7452 ms, wall 7518 ms, host staging 1025 ms: embed+steps 49 (0.7%) hc read 4 (0.1%) gdn 779 (10.5%) qsa proj 427 (5.7%) qsa indexer 0 (0.0%) qsa select 315 (4.2%) qsa attn 409 (5.5%) router+shared 186 (2.5%) host grouping 52 (0.7%) gather 107 (1.4%) wait copy 151 (2.0%) dequant 613 (8.2%) gemm gate/up 1501 (20.1%) gemm down 686 (9.2%) combine 194 (
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 3 ms, waiting for each chunk 26 ms, after each chunk (the draft layer, progress) 92 ms, PLE 52 ms
+strata prefill timing: 52532 tokens, GPU timeline 7418 ms, wall 7485 ms, host staging 1590 ms: embed+steps 49 (0.7%) hc read 4 (0.1%) gdn 781 (10.5%) qsa proj 434 (5.8%) qsa indexer 0 (0.0%) qsa select 319 (4.3%) qsa attn 408 (5.5%) router+shared 188 (2.5%) host grouping 46 (0.6%) gather 107 (1.4%) wait copy 151 (2.0%) dequant 618 (8.3%) gemm gate/up 1512 (20.4%) gemm down 635 (8.6%) combine 196 (
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 26 ms, after each chunk (the draft layer, progress) 92 ms, PLE 53 ms
+strata prefill timing: 52533 tokens, GPU timeline 7428 ms, wall 7464 ms, host staging 2155 ms: embed+steps 49 (0.7%) hc read 4 (0.1%) gdn 784 (10.6%) qsa proj 433 (5.8%) qsa indexer 0 (0.0%) qsa select 319 (4.3%) qsa attn 414 (5.6%) router+shared 186 (2.5%) host grouping 46 (0.6%) gather 107 (1.4%) wait copy 152 (2.0%) dequant 615 (8.3%) gemm gate/up 1514 (20.4%) gemm down 636 (8.6%) combine 195 (
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 28 ms, after each chunk (the draft layer, progress) 62 ms, PLE 58 ms
+[p7-base] decode timing medians over 4 requests: {'ms/window': 16.3, 'tok/win': 1.46, 'verify': 13.305, 'reach': 6.455, 'layerhost': 6.6, 'stage': 0.005, 'commit': 0.03, 'draft': 0.645, 'ajoin': 0.47, 'other': 0.01, 'cpuexp': 1.515}
+[p7-base] pool: {'gu': 4.293, 'q': 0.013, 'down': 2.071, 'GBs': 28.1}
+[p7-mmq] up in 54s
+p8k: prompt tok/s [4653.5, 4934.2, 5091.4] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+p32k: prompt tok/s [6625.9, 6445.6, 6467.5] ans ['BENCHMARK-ACK', 'BENCHMARK-ACK', 'BENCHMARK-ACK']
+strata prefill timing: 12892 tokens, GPU timeline 2509 ms, wall 2524 ms, host staging 151 ms: embed+steps 8 (0.3%) hc read 1 (0.0%) gdn 310 (12.3%) qsa proj 111 (4.4%) qsa indexer 0 (0.0%) qsa select 31 (1.2%) qsa attn 95 (3.8%) router+shared 56 (2.2%) host grouping 18 (0.7%) gather 23 (0.9%) wait copy 92 (3.7%) dequant 305 (12.1%) gemm gate/up 523 (20.8%) gemm down 266 (10.6%) combine 47 (1.9%) p
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 1 ms, waiting for each chunk 5 ms, after each chunk (the draft layer, progress) 14 ms, PLE 0 ms
+strata prefill timing: 12892 tokens, GPU timeline 2186 ms, wall 2200 ms, host staging 324 ms: embed+steps 8 (0.4%) hc read 1 (0.1%) gdn 206 (9.4%) qsa proj 110 (5.0%) qsa indexer 0 (0.0%) qsa select 32 (1.5%) qsa attn 95 (4.4%) router+shared 47 (2.1%) host grouping 19 (0.9%) gather 24 (1.1%) wait copy 95 (4.3%) dequant 304 (13.9%) gemm gate/up 471 (21.6%) gemm down 229 (10.5%) combine 48 (2.2%) pl
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 8 ms, after each chunk (the draft layer, progress) 14 ms, PLE 12 ms
+strata prefill timing: 12892 tokens, GPU timeline 2183 ms, wall 2197 ms, host staging 481 ms: embed+steps 8 (0.4%) hc read 1 (0.0%) gdn 208 (9.5%) qsa proj 111 (5.1%) qsa indexer 0 (0.0%) qsa select 32 (1.5%) qsa attn 96 (4.4%) router+shared 47 (2.2%) host grouping 14 (0.6%) gather 23 (1.1%) wait copy 93 (4.3%) dequant 304 (13.9%) gemm gate/up 472 (21.6%) gemm down 231 (10.6%) combine 49 (2.3%) pl
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 1 ms, waiting for each chunk 8 ms, after each chunk (the draft layer, progress) 14 ms, PLE 12 ms
+strata prefill timing: 52532 tokens, GPU timeline 7428 ms, wall 7471 ms, host staging 1052 ms: embed+steps 61 (0.8%) hc read 4 (0.1%) gdn 783 (10.5%) qsa proj 433 (5.8%) qsa indexer 0 (0.0%) qsa select 318 (4.3%) qsa attn 408 (5.5%) router+shared 189 (2.5%) host grouping 45 (0.6%) gather 107 (1.4%) wait copy 153 (2.1%) dequant 617 (8.3%) gemm gate/up 1509 (20.3%) gemm down 636 (8.6%) combine 196 (
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 28 ms, after each chunk (the draft layer, progress) 81 ms, PLE 12 ms
+strata prefill timing: 52533 tokens, GPU timeline 7393 ms, wall 7447 ms, host staging 1611 ms: embed+steps 51 (0.7%) hc read 4 (0.1%) gdn 780 (10.5%) qsa proj 432 (5.8%) qsa indexer 0 (0.0%) qsa select 318 (4.3%) qsa attn 411 (5.6%) router+shared 188 (2.5%) host grouping 44 (0.6%) gather 107 (1.4%) wait copy 148 (2.0%) dequant 615 (8.3%) gemm gate/up 1506 (20.4%) gemm down 633 (8.6%) combine 196 (
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 27 ms, after each chunk (the draft layer, progress) 79 ms, PLE 14 ms
+strata prefill timing: 52533 tokens, GPU timeline 7411 ms, wall 7462 ms, host staging 2173 ms: embed+steps 49 (0.7%) hc read 4 (0.1%) gdn 784 (10.6%) qsa proj 435 (5.9%) qsa indexer 0 (0.0%) qsa select 319 (4.3%) qsa attn 412 (5.6%) router+shared 188 (2.5%) host grouping 44 (0.6%) gather 107 (1.4%) wait copy 150 (2.0%) dequant 612 (8.3%) gemm gate/up 1512 (20.4%) gemm down 636 (8.6%) combine 194 (
+strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 26 ms, after each chunk (the draft layer, progress) 76 ms, PLE 18 ms
+[p7-mmq] decode timing medians over 4 requests: {'ms/window': 17.355, 'tok/win': 1.46, 'verify': 14.53, 'reach': 6.58, 'layerhost': 7.45, 'stage': 0.0, 'commit': 0.035, 'draft': 0.665, 'ajoin': 0.51, 'other': 0.01, 'cpuexp': 1.72}
+[p7-mmq] pool: {'gu': 4.843, 'q': 0.015, 'down': 2.345, 'GBs': 32.0}
+done
