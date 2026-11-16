@@ -1,0 +1,132 @@
+{
+ "requests": [
+  {
+   "segment": "code",
+   "tokens": 256
+  },
+  {
+   "segment": "code",
+   "tokens": 512
+  },
+  {
+   "segment": "code",
+   "tokens": 768
+  },
+  {
+   "segment": "code",
+   "tokens": 1000
+  },
+  {
+   "segment": "docs",
+   "tokens": 256
+  },
+  {
+   "segment": "docs",
+   "tokens": 512
+  },
+  {
+   "segment": "docs",
+   "tokens": 768
+  },
+  {
+   "segment": "docs",
+   "tokens": 1000
+  },
+  {
+   "segment": "english",
+   "tokens": 256
+  },
+  {
+   "segment": "english",
+   "tokens": 512
+  },
+  {
+   "segment": "english",
+   "tokens": 768
+  },
+  {
+   "segment": "english",
+   "tokens": 1000
+  },
+  {
+   "segment": "multilingual",
+   "tokens": 256
+  },
+  {
+   "segment": "multilingual",
+   "tokens": 512
+  },
+  {
+   "segment": "multilingual",
+   "tokens": 768
+  },
+  {
+   "segment": "multilingual",
+   "tokens": 1000
+  },
+  {
+   "segment": "agent",
+   "tokens": 256
+  },
+  {
+   "segment": "agent",
+   "tokens": 512
+  },
+  {
+   "segment": "agent",
+   "tokens": 768
+  },
+  {
+   "segment": "agent",
+   "tokens": 1000
+  }
+ ],
+ "args": [
+  "/home/spark/Apps/Strata/engine/strata-zen5-test",
+  "--serve",
+  "--pack",
+  "/home/spark/Apps/Strata/packs/unsloth-v31-iq4_xs-l1",
+  "--native",
+  "/home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf",
+  "--ple-gguf",
+  "/home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf",
+  "--ple-io",
+  "direct",
+  "--embd-gguf",
+  "/home/spark/Apps/MODELS/token-embd-bf16-official.gguf",
+  "--expert-profile",
+  "/home/spark/Apps/Strata/data/expert-profile-unsloth-v31-learned.bin",
+  "--mmap-experts",
+  "--resident-budget-gib",
+  "64",
+  "--spec",
+  "4",
+  "--spec-min-p",
+  "0.7",
+  "--mtp",
+  "/home/spark/Apps/Strata/mtp/rt",
+  "--vram-reserve-mib",
+  "1152",
+  "--vram-elastic-hold-mib",
+  "2816",
+  "--expert-cache",
+  "1500",
+  "--adapt-every",
+  "100000",
+  "--pcie-frac",
+  "0",
+  "--suffix-draft",
+  "0",
+  "--prompt-cache",
+  "0",
+  "--kv",
+  "fp16",
+  "--max-context",
+  "1512",
+  "--prefill",
+  "auto"
+ ],
+ "env": [
+  "STRATA_PREFILL_CPU_SHARE=auto"
+ ]
+}

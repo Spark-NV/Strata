@@ -16,7 +16,7 @@ if "args" in kv: args+=kv.pop("args").split()
 if "set" in kv:   # set='--prefill 16384;--spec 5'
     for d in kv.pop("set").split(";"):
         k,v=d.split(); args[args.index(k)+1]=v
-perf=kv.pop("perf","0")=="1"; mixed=kv.pop("mixed","0")=="1"; n=int(kv.pop("n","8")); pre=kv.pop("prefill","0")=="1"; lng=kv.pop("long","0")=="1"; ponly=kv.pop("ponly","0")=="1"; greedy=kv.pop("greedy","0")=="1"; seeded=kv.pop("seeded","0")=="1"; novis=kv.pop("novision","0")=="1"
+perf=kv.pop("perf","0")=="1"; mixed=kv.pop("mixed","0")=="1"; n=int(kv.pop("n","8")); pre=kv.pop("prefill","0")=="1"; lng=kv.pop("long","0")=="1"; short=kv.pop("short","0")=="1"; ponly=kv.pop("ponly","0")=="1"; greedy=kv.pop("greedy","0")=="1"; seeded=kv.pop("seeded","0")=="1"; novis=kv.pop("novision","0")=="1"
 if novis: c.pop("vision",None); args.remove("--vision")
 c["env"]={**c.get("env",{}), "STRATA_DECODE_TIMING":"1", **kv}
 cfg=f"{SP}/ab-{name}.json"; json.dump(c,open(cfg,"w"),indent=1)
@@ -42,6 +42,7 @@ print(f"[{name}] up in {time.time()-t:.0f}s", flush=True)
 cmd=[sys.executable,f"{SP}/probe.py","--base","http://127.0.0.1:8090","--n",str(n),"--out",f"{SP}/ab-{name}-probe.json"]
 if pre: cmd.append("--prefill")
 if lng: cmd.append("--long")
+if short: cmd+=["--prefill","--short"]
 if ponly: cmd+=["--prefill","--prefill-only"]
 if learn:
     subprocess.run([sys.executable,f"{SP}/learn_profile.py","--base","http://127.0.0.1:8090","--rounds",kv.pop("rounds","3") if False else "3"])

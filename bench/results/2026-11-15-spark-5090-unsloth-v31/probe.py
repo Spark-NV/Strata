@@ -29,7 +29,8 @@ ap.add_argument("--skip", type=int, default=2)
 ap.add_argument("--out")
 ap.add_argument("--prefill", action="store_true")
 ap.add_argument("--long", action="store_true")
-ap.add_argument("--prefill-only", action="store_true")   # also three ~190K-token reads (the corpus runs ~11 tokens a word)
+ap.add_argument("--prefill-only", action="store_true")
+ap.add_argument("--short", action="store_true")   # short prompts (~300 / ~700 tokens), the size of a chat follow-up   # also three ~190K-token reads (the corpus runs ~11 tokens a word)
 a = ap.parse_args()
 model = sb.get_json(a.base + "/health").get("model") or ""
 res = {}
@@ -42,9 +43,9 @@ for tag, p in (() if a.prefill_only else (("story", STORY), ("code", CODE), ("wo
     print(f"{tag}: decode median {statistics.median(d):.1f} mean {statistics.mean(d):.1f} all {[round(x,1) for x in d]} out {[r['output_tokens'] for r in rows]} acc {acc:.3f}")
     res[tag] = rows
 if a.prefill:
-    for name, words in (("p8k", 1500), ("p32k", 5200)) + ((("p190k", 17000),) if a.long else ()):
+    for name, words in ((("p300", 55), ("p700", 130)) if a.short else (("p8k", 1500), ("p32k", 5200)) + ((("p190k", 17000),) if a.long else ())):
         rows = []
-        for i in range(3):
+        for i in range(8 if a.short else 3):
             case = {"prompt": f"[{name} {time.time()}] Read this reference text and reply with exactly BENCHMARK-ACK.\n\n" + sb.corpus(words, name + str(i)), "max_tokens": 16}
             rows.append(sb.request_case(a.base, model, case, 600))
         print(f"{name}: prompt tok/s {[r['prompt_tok_s'] for r in rows]} ans {[r['answer_preview'][:20] for r in rows]}")

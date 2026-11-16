@@ -1,0 +1,12 @@
+engine: /home/spark/Apps/Strata/engine/strata-zen5-test --serve --pack /home/spark/Apps/Strata/packs/unsloth-v31-iq4_xs-l1 --native /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-gguf /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-io direct --embd-gguf /home/spark/Apps/MODELS/token-embd-bf16-official.gguf --expert-profile /home/spark/Apps/Strata/data/expert-profile-unsloth-v31-learned.bin --mmap-experts --resident-budget-gib 64 --spec 4 --spec-min-p 0.7 --mtp /home/spark/Apps/Strata/mtp/rt --vram-reserve-mib 1152 --vram-elastic-hold-mib 2816 --expert-cache 1 --adapt-every 100000 --pcie-frac 0 --suffix-draft 0 --prompt-cache 0 --kv fp16 --max-context 1512 --short-read 1064 --prefill 512
+code: 999 positions, 17.4 s
+docs: 999 positions, 17.1 s
+english: 999 positions, 16.3 s
+multilingual: 999 positions, 17.4 s
+agent: 999 positions, 17.7 s
+7 workers on 9950X3D != 7800X3D output
+reference: bench/results/2026-11-15-spark-5090-unsloth-v31/qq-l1-new.tsv
+run                                      segment         pos    top1       KL   KL p99     PPL PPL ref
+qq-l1-zen5-w7.tsv                        all            4995  95.60%  0.01592   0.2477   4.016   4.010
+qq-l1-zen5.tsv                           all            4995  95.60%  0.01592   0.2477   4.016   4.010
+DONE

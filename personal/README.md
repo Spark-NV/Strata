@@ -10,6 +10,9 @@ embedding, and since round 2 the expert RAM on 2 MiB pages where free (`STRATA_P
 Before each start, `qwen-orca-iq4xs.service` runs the root step in [system/](system/) (`ExecStartPre`), which frees the page cache
 and compacts RAM, so all of the expert RAM gets 2 MiB pages (about 50 GiB instead of about 30). Install it once with
 `sudo sh personal/system/install.sh`; the undo steps are in that file. Measured: decode 140.3 vs 140.2 tok/s, within the spread.
+Since the Ryzen 9 9950X3D (2026-11-15): engine rebuilt for Zen 5 (`engine/strata`, the Zen 4 build kept as
+`engine/strata-2026-11-15-zen4-backup`), no profile change. Mixed decode 144-152 tok/s (was 139-141). Keep Gigabyte's
+X3D Turbo Mode off in the BIOS: it hides the second chiplet. Details: the results README, round 3.
 Measurements and what was tried:
 [`bench/results/2026-11-15-spark-5090-unsloth-v31`](../bench/results/2026-11-15-spark-5090-unsloth-v31/README.md).
 To go back, point the unit's `--config` at `rtx5090-orca-iq4xs.json`; the engines from before are

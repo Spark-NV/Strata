@@ -1,0 +1,19 @@
+engine: /home/spark/Apps/Strata/engine/strata-zen5-test --serve --pack /home/spark/Apps/Strata/packs/unsloth-v31-iq4_xs-l1 --native /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-gguf /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-io direct --embd-gguf /home/spark/Apps/MODELS/token-embd-bf16-official.gguf --expert-profile /tmp/claude-1000/-home-spark-Apps-Strata/1b7f84bc-29b3-4220-b0ef-9b94d66e54e8/scratchpad/prof/1b814f92.bin --mmap-experts --resident-budget-gib 64 --spec 4 --spec-min-p 0.7 --mtp /home/spark/Apps/Strata/mtp/rt --vram-reserve-mib 1152 --vram-elastic-hold-mib 2816 --expert-cache 1 --adapt-every 100000 --pcie-frac 0 --suffix-draft 0 --prompt-cache 0 --kv fp16 --max-context 1512 --short-read 1064 --prefill 512
+code: 999 positions, 17.3 s
+docs: 999 positions, 17.3 s
+english: 999 positions, 17.2 s
+multilingual: 999 positions, 17.3 s
+agent: 999 positions, 18.3 s
+profile 1b814f92 on 9950X3D != 7800X3D output
+engine: /home/spark/Apps/Strata/engine/strata-zen5-test --serve --pack /home/spark/Apps/Strata/packs/unsloth-v31-iq4_xs-l1 --native /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-gguf /home/spark/Apps/MODELS/Qwen3.8-Flash-Next-Unsloth_V3.1_UD-IQ4_XS-abliterated-L1.gguf --ple-io direct --embd-gguf /home/spark/Apps/MODELS/token-embd-bf16-official.gguf --expert-profile /tmp/claude-1000/-home-spark-Apps-Strata/1b7f84bc-29b3-4220-b0ef-9b94d66e54e8/scratchpad/prof/65a0b5b7.bin --mmap-experts --resident-budget-gib 64 --spec 4 --spec-min-p 0.7 --mtp /home/spark/Apps/Strata/mtp/rt --vram-reserve-mib 1152 --vram-elastic-hold-mib 2816 --expert-cache 1 --adapt-every 100000 --pcie-frac 0 --suffix-draft 0 --prompt-cache 0 --kv fp16 --max-context 1512 --short-read 1064 --prefill 512
+code: 999 positions, 17.5 s
+docs: 999 positions, 17.0 s
+english: 999 positions, 16.3 s
+multilingual: 999 positions, 16.8 s
+agent: 999 positions, 17.8 s
+profile 65a0b5b7 on 9950X3D != 7800X3D output
+reference: bench/results/2026-11-15-spark-5090-unsloth-v31/qq-l1-new.tsv
+run                                      segment         pos    top1       KL   KL p99     PPL PPL ref
+qq-l1-zen5-prof1b814f92.tsv              all            4995  95.32%  0.01577   0.2309   4.023   4.010
+qq-l1-zen5-prof65a0b5b7.tsv              all            4995  95.58%  0.01593   0.2478   4.018   4.010
+DONE

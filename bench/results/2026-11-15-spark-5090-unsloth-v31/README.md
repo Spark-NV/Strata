@@ -91,3 +91,68 @@ Quality (`qq-compare.txt` method, against the old reference): level 1 perplexity
 | `STRATA_DEQUANT_SIDE=1` (prompt) | 13K / 52K tokens: 5,897 / 7,032 vs 5,851 / 7,031 tok/s |
 | `STRATA_PF_FUSED_NT=256 STRATA_PF_BATCH=256` (prompt) | 5,758 / 6,943 vs 5,793 / 6,973 |
 | All of the expert RAM on 2 MiB pages (root: `sync; echo 3 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory` before the start, `runc.sh`, `tc.out`) | 48.1-50.1 GiB of huge pages instead of about 30. Mixed 137.0 / 140.3 / 143.5 against 140.0 / 140.4 with 4 KiB pages (`STRATA_COMPLEMENT_THP=0`), interleaved on the same compacted RAM; CPU gate/up 1.97-2.32 vs 2.20-2.37 ms. No decode gain beyond the spread; kept anyway at Spark's choice, since it costs nothing (start 46 s, unchanged): `personal/system/` runs it before every start. |
+
+## Round 3: Ryzen 9 9950X3D (same day)
+
+**Measured on:** the same PC with the 7800X3D replaced by a Ryzen 9 9950X3D (16 cores, 2 chiplets: cores 0-7 with
+96 MB L3, 8-15 with 32 MB, SMT siblings 16-31), G.SKILL F5-5200J4040A48G 2x48 GB at DDR5-5600 (timings on Auto:
+40-40-40-83, tRFC 1065, tREFI 10892), the level-1 file and the live profile. Sampled probes as above.
+
+The board's "X3D Turbo Mode" (Gigabyte) was on at first: it hides the second chiplet and SMT, and Linux saw 8 cores.
+
+### RAM bandwidth (`tools/bw/bw`, 16 GiB of reads, threads pinned)
+
+| Threads on | GB/s read |
+|---|---|
+| 1 core | 64.9 |
+| cores 1-7 (V-Cache chiplet) | 60.1 |
+| cores 8-15 (second chiplet) | 58.7 |
+| cores 1-15 | 60.0 |
+| all 32 threads | 60.0 |
+
+The RAM is the limit at this speed and these timings, not the chiplet links: a second chiplet adds no bandwidth. Refresh
+alone holds each rank about 10% of the time (tRFC 380 ns every 3.89 us).
+
+### Decode, worker layouts (`run10.sh`, `t11.out`)
+
+| Arm | Mixed tok/s |
+|---|---|
+| default (15 workers, both chiplets, host on core 0) | 140.0 (first start), 150.5 |
+| `STRATA_POOL_CORES=1-15` | 150.1 |
+| `STRATA_POOL_CORES=8-15` (second chiplet) | 151.7 |
+| `STRATA_POOL_CORES=1-7` (V-Cache chiplet) | 145.7, 147.2 |
+| `STRATA_POOL_CORES=1-15,17-31` (SMT) | 144.2 |
+| the Zen 4-built engine | 148.2 |
+
+On the 7800X3D the same probes gave 139-141. The gain is the faster cores: per-layer host time fell from about 4.3 to
+3.3-3.8 ms a window, while the pool's read rate stayed at 48-51 GB/s. The engine's own PCIe share now starts at 0.35-0.40
+(15 workers) instead of 0.55. The default is kept.
+
+### Retried ideas (`run11.sh`, `t12.out`; baselines 147.6 / 150.2 / 143.8)
+
+| Arm | Mixed tok/s |
+|---|---|
+| `--spec 5` / `--spec 6` | 148.7 / 148.8 |
+| `--pool-tasks 96` | 145.6 |
+| `STRATA_DRAFT_CUM=1 --spec 6` | 105.7 |
+| `--pcie-frac 0.45` / `0.65` | 142.9 / 142.8 |
+| Zen 4 kernel picks (`STRATA_AVX512_1T=0 STRATA_IQ4NL512=0`, `run13.sh`) | 146.1 / 145.8 against 139.8 / 143.3, CPU gate/up the same (2.03-2.08 vs 1.84-2.13 ms) |
+
+None is faster beyond the spread.
+
+### Short prompts: `STRATA_PREFILL_CPU_SHARE=auto` (`run12.sh`, `t13.out`), not kept
+
+Prompt tok/s, 8 prompts each, two rounds: ~500 tokens 658 / 901 (GPU only) vs 889 / 905; ~1,150 tokens 1,346 / 1,412 vs
+1,721 / 1,734 (+25%, about 0.2 s sooner to the first word). The logits after 20 prompts of 256-1000 tokens
+(`quant_quality.py prompt --gpu-experts`, `qp-*`): GPU only twice gives KL 0; with the share, top-1 the same in 20/20 but
+KL mean 0.011, max 0.079. It changes answers, so it stays off under the no-quality-loss rule.
+
+### Exactness
+
+- The Zen 5 rebuild (`-march=native` = znver5 for ggml-cpu) and the Zen 4-built engine give byte-identical quality runs on
+  the 9950X3D (`qq-l1-old9950.tsv` = `qq-l1-zen5.tsv`), and the IQ3_XXS parity hash is unchanged (b944938c12bcbbb3).
+  The rebuild is installed (`engine/strata`; the Zen 4 build is `engine/strata-2026-11-15-zen4-backup`). It is not faster.
+- Against the 7800X3D reference (`qq-l1-new.tsv`) the 9950X3D differs: top-1 95.6%, KL 0.016, PPL 4.016 vs 4.010. Not
+  the worker count (7 workers give the same file), partly the expert profile learned since (earlier profiles: KL 0.003
+  between them on this CPU), and mostly the CPU kernels the engine picks on Zen 5 (`cpu_gather_fast`): with the Zen 4
+  picks KL falls to 0.008 but PPL is 4.029. Every arm is within 4.010-4.029, so the default picks stay.
