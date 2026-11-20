@@ -134,3 +134,21 @@ test('every Vibe helper keeps send_message, and one without the skill tool is no
   assert.ok(names(builder).includes('skill') && names(builder).includes('send_message'));
   assert.match(builder.messages.at(-1).content, /code-review/, 'a builder has the skill tool and keeps the list');
 });
+
+test('a parameter name written as the function name (the tool name and first <parameter=> left out) is that tool\'s call', () => {
+  // The Code chat that stopped on 2026-11-20: `<function=description>` for bash; the turn ended because nothing read it as a call.
+  const text = 'One spot-check, then record:<tool_call>\n<function=description>\nRecord D023, commit and push\n</parameter>\n<parameter=command>\ncd /p && python3 - <<\'PY\'\nprint("x</y>")\nPY\n</parameter>\n</function>\n</tool_call>';
+  const out = rewriteCompletion({ choices: [{ message: { role: 'assistant', content: text }, finish_reason: 'stop' }] }, index);
+  const call = out.choices[0].message.tool_calls[0];
+  assert.equal(out.choices[0].finish_reason, 'tool_calls');
+  assert.equal(call.function.name, 'bash');
+  assert.deepEqual(JSON.parse(call.function.arguments), { description: 'Record D023, commit and push', command: 'cd /p && python3 - <<\'PY\'\nprint("x</y>")\nPY' });
+  assert.equal(out.choices[0].message.content, 'One spot-check, then record:');
+  // A name no offered tool has as a parameter still keeps the turn going: an unknown tool the Harness answers with an error.
+  const odd = parseCalls('<tool_call>\n<function=nonsense>\nv\n</parameter>\n<parameter=command>\nls\n</parameter>\n</function>\n</tool_call>');
+  const [made] = rewriteCompletion({ choices: [{ message: { role: 'assistant', content: '<tool_call>\n<function=nonsense>\nv\n</parameter>\n<parameter=command>\nls\n</parameter>\n</function>\n</tool_call>' } }] }, index).choices[0].message.tool_calls;
+  assert.equal(odd.length, 1);
+  assert.equal(made.function.name, 'unavailable_nonsense');
+  // Prose around a stray </parameter> is still text.
+  assert.equal(parseCalls('<tool_call>\n<function=bash>\nI will run ls</parameter> and more words <parameter=x\n</function>\n</tool_call>'), null);
+});

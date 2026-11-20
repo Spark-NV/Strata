@@ -122,8 +122,13 @@ function parseBody(body) {
     const re = /<parameter=([^>\s]+)>\n?([\s\S]*?)\n?<\/parameter>/g;
     let m;
     while ((m = re.exec(fn[2]))) args[m[1]] = m[2];
-    if (fn[2].replace(re, '').trim()) return null;
-    return { name: fn[1], args };
+    const left = fn[2].replace(re, '').trim();
+    if (!left) return { name: fn[1], args };
+    // A parameter's name written as the function's (`<function=description>VALUE</parameter><parameter=command>…`, the tool's own name
+    // and the first <parameter=…> left out): its value is the text before that first </parameter>. toToolCalls finds the tool.
+    const lead = /^\n?([\s\S]*?)\n?<\/parameter>/.exec(fn[2]);
+    if (lead && !lead[1].includes('<parameter=') && !fn[2].slice(lead[0].length).replace(re, '').trim()) return { name: fn[1], args, lead: lead[1] };
+    return null;
   }
   try {
     const j = JSON.parse(body);
@@ -139,7 +144,13 @@ let counter = 0;
 /** Parsed calls as OpenAI tool calls for this request's tools. */
 export function toToolCalls(calls, index, { base = 0 } = {}) {
   return calls.map((c, i) => {
-    const name = resolveName(c.name, index);
+    let name = resolveName(c.name, index);
+    if (c.lead !== undefined) {
+      // The name is a parameter's: the one offered tool that has it and every other parameter written is the call's tool.
+      const fits = name ? [] : [...index.values()].filter(t => c.name in t.props && Object.keys(c.args).every(k => k in t.props));
+      if (fits.length === 1) name = fits[0].name;
+      c = { ...c, args: name && fits.length === 1 ? { [c.name]: c.lead, ...c.args } : { ...c.args, [c.name]: c.lead } };
+    }
     const fnName = name ?? `unavailable_${String(c.name).replace(/[^\w-]/g, '_').slice(0, 60)}`;
     const args = name ? matchArgs(c.args, index.get(name)) : c.args;
     return { index: base + i, id: `call_text_${Date.now().toString(36)}_${(counter++).toString(36)}`, type: 'function', function: { name: fnName, arguments: JSON.stringify(args) } };
