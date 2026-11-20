@@ -6,7 +6,7 @@ import http from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createActivityLog, createModelReleaser, gameOf, IDLE_BY_HAND, releaseConfig, scanGames } from '../server/model-release.mjs';
+import { createActivityLog, createGameWatch, createModelReleaser, gameOf, IDLE_BY_HAND, releaseConfig, scanGames } from '../server/model-release.mjs';
 import { readFileSync } from 'node:fs';
 import { createPinnedModel } from '../server/pinned-model.mjs';
 
@@ -290,4 +290,39 @@ test('the status chip opens a menu that idles the pinned model through the same 
   // The released state is the one wakePinned() starts again when the person types.
   assert.match(store, /export function wakePinned\(\) \{\n  const p = state\.pinned;\n  if \(!p\?\.enabled \|\| p\.phase !== 'released'/);
   assert.equal(read('src/lib/store.ts').includes(`IDLE_BY_HAND = '${IDLE_BY_HAND}'`), true, 'the web UI and the host agree on the marker');
+});
+
+test('game release can be turned off: no game stops the model, the choice is kept, and games running when it is turned on again do not count', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'strata-gamewatch-'));
+  try {
+    const file = join(dir, 'game-release.json');
+    let running = new Map();
+    const watch = createGameWatch({ scan: () => new Map(running), file });
+    const pinned = fakePinned();
+    const r = createModelReleaser({ pinned, idleMs: 30 * 60_000, gameRelease: true, games: () => watch.games(), metrics: async () => idleMetrics() });
+    await r.tick();
+    assert.deepEqual(watch.set(false), { allowed: true, enabled: false });
+    running = new Map([['steam:1', 'Modded game']]);   // the agent launches the game it works on
+    assert.equal(await r.tick(), null);
+    assert.deepEqual(pinned.released, []);
+    assert.equal(createGameWatch({ scan: () => running, file }).state().enabled, false, 'still off after an app restart');
+    watch.set(true);                                      // turned on while that game runs: it is not "starting"
+    assert.equal(await r.tick(), null);
+    running = new Map([['steam:1', 'Modded game'], ['steam:2', 'Another game']]);
+    assert.equal(await r.tick(), 'game');
+    assert.deepEqual(pinned.released, [['game', 'Another game']]);
+    running = new Map();                                  // the hidden game ends; launched again later, it counts
+    watch.games();
+    running = new Map([['steam:1', 'Modded game']]);
+    assert.deepEqual([...watch.games().keys()], ['steam:1']);
+    assert.deepEqual(createGameWatch({ scan: () => running, allowed: false }).set(true), { allowed: false, enabled: false }, 'STRATA_PIN_GAME_RELEASE=0 keeps it off');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the status menu has the game release switch, kept by the host', () => {
+  const read = f => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+  const bar = read('src/app/Sidebar.tsx'), index = read('server/index.mjs');
+  assert.match(bar, /role="switch" aria-label=\{tr\("Stop the model when a game starts"\)\} aria-checked=\{gameRelease\.enabled\}/);
+  assert.match(index, /const runningGames = \(\) => gameWatch\.games\(\);/, 'the pinned and the image model both read the switch');
+  assert.match(index, /path === '\/api\/pinned\/game-release' && method === 'PUT'/);
 });

@@ -430,6 +430,10 @@ export const IDLE_BY_HAND = 'by hand';
 export async function idlePinned(): Promise<string | null> {
   try { const p = await api.post<PinnedModelState>('/api/pinned/idle', {}); set({ pinned: p }); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
 }
+/** Game release (server/model-release.mjs createGameWatch): on, a game starting stops the model; off, it stays off until turned on. */
+export interface GameReleaseState { allowed: boolean; enabled: boolean }
+export function getGameRelease(): Promise<GameReleaseState> { return api.get<GameReleaseState>('/api/pinned/game-release'); }
+export function setGameRelease(enabled: boolean): Promise<GameReleaseState> { return api.put<GameReleaseState>('/api/pinned/game-release', { enabled }); }
 /** Starts a released pinned model now (the status menu's "Start now"): the same start as a chat's (POST /api/pinned/start). */
 export function startPinned() {
   if (state.pinned?.enabled && state.pinned.phase === 'released') void api.post('/api/pinned/start', {}).catch(() => {});

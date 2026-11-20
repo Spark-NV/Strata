@@ -96,7 +96,7 @@ import { createTimeSkip, measureFolder, timeskipRevisionMessage, imageTypeOf } f
 import { createProfileStore, offlineModelRefusal, profileSampling, PROFILE_IDS, turnProfileId } from './profiles.mjs';
 import { BOOK_DIR as VIBE_BOOK_DIR, loadBook as vibeLoadBook, loadRun as vibeLoadRun, publicState as vibePublicState } from './agent/vibe-state.mjs';
 import { createPinnedModel, pinConfig } from './pinned-model.mjs';
-import { createActivityLog, createModelReleaser, releaseConfig, scanGames } from './model-release.mjs';
+import { createActivityLog, createGameWatch, createModelReleaser, releaseConfig, scanGames } from './model-release.mjs';
 import { createImageModel, imageModelConfig } from './image-model.mjs';
 import { createRemoteAccess, remoteConfig } from './remote-access.mjs';
 import { createRpStore } from './rp/store.mjs';
@@ -153,7 +153,9 @@ pinned.onChange(state => hub.send('pinned', state));
 /* Its memory given back when it is not wanted (model-release.mjs): at once when a game starts, after 30 minutes idle. Not started
    with the app while a game runs; the first chat starts it then. */
 const RELEASE = releaseConfig();
-const runningGames = () => scanGames({ extra: RELEASE.extraGames });
+/* The person can turn game release off in the status chip's menu (it stays off until turned on); STRATA_PIN_GAME_RELEASE=0 turns it off for good. */
+const gameWatch = createGameWatch({ scan: () => scanGames({ extra: RELEASE.extraGames }), file: join(store.DATA_DIR, 'game-release.json'), allowed: RELEASE.gameRelease });
+const runningGames = () => gameWatch.games();
 /** When the pinned model ran and was stopped, and why (the Monitor's Model time). */
 const modelActivity = PIN ? createActivityLog({ file: join(store.DATA_DIR, 'model-activity.json') }) : null;
 /* Image chats' model (image-model.mjs): loaded when an Image chat needs it, after the pinned model is stopped; unloaded when the
@@ -2247,6 +2249,9 @@ async function api(req, res, path, method, url) {
     if (pinned.state().phase !== 'ready') return error(res, 409, 'The model is not running, so there is nothing to idle.');
     try { return (await releaser.idleNow()) ? json(res, 200, pinned.state()) : error(res, 409, pinned.state().error ?? 'The model could not be stopped.'); } catch (e) { return error(res, 500, e.message); }
   }
+  // Game release on or off (the status chip's menu): off, a game starting no longer stops the model.
+  if (path === '/api/pinned/game-release' && method === 'GET') return json(res, 200, gameWatch.state());
+  if (path === '/api/pinned/game-release' && method === 'PUT') { const body = await readBody(req); return json(res, 200, gameWatch.set(body?.enabled)); }
   if (path === '/api/pinned/start' && method === 'POST') { try { await pinned.ensure(); return json(res, 200, pinned.state()); } catch (e) { return error(res, 503, e.message); } }
   // Image chats (image-model.mjs): the model's state, load and unload, a request streamed as it draws, and the images made.
   if (path === '/api/image-model' && method === 'GET') return json(res, 200, imageModel.state());

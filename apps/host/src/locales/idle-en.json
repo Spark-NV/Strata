@@ -9,5 +9,8 @@
  "id08": "Idled by you",
  "id09": "Idle now",
  "id10": "Idling…",
- "id11": "Open Monitor"
+ "id11": "Open Monitor",
+ "id12": "Stop the model when a game starts",
+ "id13": "On: a game that starts frees the graphics card at once.",
+ "id14": "Off until you turn it on: games no longer stop the model, so it can test the games it works on."
 }

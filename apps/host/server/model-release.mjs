@@ -64,6 +64,43 @@ export function scanGames({ proc = '/proc', uid = process.getuid?.(), extra = []
   return found;
 }
 
+/**
+ * The person's switch for game release (the status chip's menu), kept in a small file so it stays as set across app starts. While it
+ * is off, `games()` sees no games, so neither the pinned model nor the image model is stopped for one. When it is turned on again, the
+ * games running then are not "starting": they stay unseen until they end, the same rule as games running when the app starts.
+ */
+export function createGameWatch({ scan, file = null, allowed = true } = {}) {
+  let enabled = true;
+  if (file) { try { enabled = JSON.parse(readFileSync(file, 'utf8')).enabled !== false; } catch { enabled = true; } }
+  let hidden = new Set();
+  const save = () => {
+    if (!file) return;
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(`${file}.tmp`, JSON.stringify({ enabled }));
+      renameSync(`${file}.tmp`, file);
+    } catch { /* the watch goes on with the value in memory */ }
+  };
+  return {
+    games() {
+      if (!allowed || !enabled) return new Map();
+      const current = scan();
+      if (hidden.size) {
+        for (const id of [...hidden]) if (!current.has(id)) hidden.delete(id);
+        for (const id of hidden) current.delete(id);
+      }
+      return current;
+    },
+    state: () => ({ allowed, enabled: allowed && enabled }),
+    set(on) {
+      on = !!on;
+      if (on && !enabled) hidden = new Set(scan().keys());
+      if (on !== enabled) { enabled = on; save(); }
+      return { allowed, enabled: allowed && enabled };
+    },
+  };
+}
+
 const MISSES_DOWN = 3;
 const DAY = 24 * 60 * 60_000;
 const KEEP_MS = 8 * DAY;

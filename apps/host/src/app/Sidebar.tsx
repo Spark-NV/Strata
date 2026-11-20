@@ -18,7 +18,7 @@ import { MOD, runCommand } from '../lib/commands';
 import { bindingFor, bindingKeys, useBindings } from '../lib/shortcut-bindings';
 import { Btn, Dialog, Icon, IconBtn, type IconName } from '../components/ui';
 import { Brand } from '../components/Brand';
-import { deleteSession, go, IDLE_BY_HAND, idlePinned, isUnread, liveChatIds, newSession, profileOf, renameSession, selectSession, setNavOpen, startPinned, togglePin, toggleRail, setTheme, useStore } from '../lib/store';
+import { deleteSession, getGameRelease, go, IDLE_BY_HAND, idlePinned, setGameRelease, type GameReleaseState, isUnread, liveChatIds, newSession, profileOf, renameSession, selectSession, setNavOpen, startPinned, togglePin, toggleRail, setTheme, useStore } from '../lib/store';
 import type { SessionProfileId } from '../lib/types';
 import { imageModelLine } from '../components/ImageChat';
 /** The chat profiles, in the order the sidebar shows them. */
@@ -71,6 +71,9 @@ export function Sidebar({ containerRef }: {
     const [modelMenu, setModelMenu] = useState(false);
     const [idling, setIdling] = useState(false);
     const [idleError, setIdleError] = useState<string | null>(null);
+    // Game release on or off, read each time the menu opens (it is kept by the host, so it stays as set).
+    const [gameRelease, setGameReleaseState] = useState<GameReleaseState | null>(null);
+    useEffect(() => { if (modelMenu) void getGameRelease().then(setGameReleaseState, () => setGameReleaseState(null)); }, [modelMenu]);
     const menuTrigger = useRef<HTMLElement | null>(null);
     const current = library?.variants.find(v => v.id === library.loaded);
     const native = useNative(), nativeCurrent = native?.instances.find(i => i.id === native.defaultId);
@@ -149,6 +152,7 @@ export function Sidebar({ containerRef }: {
       <p className="small muted">{modelQuant}</p>
       {tr(pinned?.phase === 'ready' ? <p>{tr("Idle the model now to free the graphics card and its memory for other work. It is the same as 30 minutes without use: it starts again by itself when you type or send a chat, in about half a minute.")}</p> : pinned?.phase === 'released' ? <p>{tr("The model is idle and the graphics card is free. It starts again by itself when you type or send a chat, or start it now.")}</p> : <p>{tr("The model can be idled once it is running.")}</p>)}
       {tr(pinned?.phase === 'ready' && working.size ? <p className="small" role="note">{tr("A chat is working now. Idling stops its answer.")}</p> : null)}
+      {tr(gameRelease?.allowed ? <div className="row" style={{ justifyContent: 'space-between', gap: 12 }}><div><strong>{tr("Stop the model when a game starts")}</strong><p className="small muted">{tr(gameRelease.enabled ? 'On: a game that starts frees the graphics card at once.' : 'Off until you turn it on: games no longer stop the model, so it can test the games it works on.')}</p></div><button className="st-toggle" role="switch" aria-label={tr("Stop the model when a game starts")} aria-checked={gameRelease.enabled} onClick={() => { const next = !gameRelease.enabled; setGameReleaseState({ ...gameRelease, enabled: next }); void setGameRelease(next).then(setGameReleaseState, e => { setGameReleaseState(gameRelease); setIdleError(e instanceof Error ? e.message : String(e)); }); }}/></div> : null)}
       {tr(idleError ? <p className="small" role="alert">{idleError}</p> : null)}
     </div></Dialog>
     <Dialog open={!!renameId} compact title={tr("Rename chat")} onClose={() => setRenameId(null)} actions={<><Btn onClick={() => setRenameId(null)}>{tr("Cancel")}</Btn><Btn variant="primary" disabled={!name.trim()} onClick={() => {
