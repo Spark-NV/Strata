@@ -55,6 +55,9 @@ export const PRICE_PRESETS: PricePreset[] = [
   { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', provider: 'DeepSeek', rates: { miss: 0.3, hit: 0.006, out: 1.2 },
     offPeak: { peakUtc: [[1, 4], [6, 10]], rates: { miss: 0.15, hit: 0.003, out: 0.6 } },
     note: 'Half price off-peak: outside 01:00–04:00 and 06:00–10:00 UTC on weekdays, and all weekend.' },
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', provider: 'DeepSeek', rates: { miss: 1.32, hit: 0.044, out: 3.96 },
+    offPeak: { peakUtc: [[1, 4], [6, 10]], rates: { miss: 0.66, hit: 0.022, out: 1.98 } },
+    note: 'DeepSeek\'s larger model (V4.1 has only Flash). Half price off-peak, same hours as V4.1 Flash; the off-peak cache-hit price is assumed to halve too.' },
   { id: 'minimax-m3.1-flash', name: 'MiniMax M3.1 Flash', provider: 'MiniMax', rates: { miss: 0.15, hit: 0.015, out: 0.6 } },
   { id: 'qwen3.6-35b-a3b', name: 'Qwen3.6 35B A3B', provider: 'OpenRouter', rates: { miss: 0.1, hit: 0.05, out: 0.95 }, note: 'Prices differ between OpenRouter providers.' },
 ];
