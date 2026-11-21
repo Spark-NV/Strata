@@ -39,5 +39,13 @@
  "tu38": "Off-peak starts",
  "tu39": "to",
  "tu40": "Off-peak ends",
- "tu41": "List prices from November 2026, from the providers' published rates as reported by price trackers. A cloud model counts tokens its own way and may think longer or shorter, so treat this as a rough comparison."
+ "tu41": "List prices from November 2026, from the providers' published rates as reported by price trackers. A cloud model counts tokens its own way and may think longer or shorter, so treat this as a rough comparison.",
+ "tu42": "Change this model's prices",
+ "tu43": "{0} prices in US dollars per million tokens. Your changes are kept on this device.",
+ "tu44": "Peak",
+ "tu45": "Prompts up to {0} tokens",
+ "tu46": "Off-peak",
+ "tu47": "Prompts above {0} tokens",
+ "tu48": "Use list prices",
+ "tu49": "Done"
 }

@@ -139,3 +139,32 @@ export function readCustom(raw: unknown): CustomPrice {
     offRates: rates(v.offRates, DEFAULT_CUSTOM.offRates),
   };
 }
+
+/** Prices the person changed for a preset; anything left out keeps the list price. */
+export interface PriceOverride { rates?: Rates; offRates?: Rates; longRates?: Rates }
+
+export function applyOverride(p: PricePreset, o: PriceOverride | undefined): PricePreset {
+  if (!o) return p;
+  return {
+    ...p,
+    rates: o.rates ?? p.rates,
+    ...(p.offPeak ? { offPeak: { ...p.offPeak, rates: o.offRates ?? p.offPeak.rates } } : {}),
+    ...(p.long ? { long: { ...p.long, rates: o.longRates ?? p.long.rates } } : {}),
+  };
+}
+
+/** Saved overrides, kept only for presets that still exist and checked field by field. */
+export function readOverrides(raw: unknown): Record<string, PriceOverride> {
+  const out: Record<string, PriceOverride> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const p of PRICE_PRESETS) {
+    const v = (raw as any)[p.id];
+    if (!v || typeof v !== 'object') continue;
+    const o: PriceOverride = {};
+    if (v.rates) o.rates = rates(v.rates, p.rates);
+    if (v.offRates && p.offPeak) o.offRates = rates(v.offRates, p.offPeak.rates);
+    if (v.longRates && p.long) o.longRates = rates(v.longRates, p.long.rates);
+    if (Object.keys(o).length) out[p.id] = o;
+  }
+  return out;
+}

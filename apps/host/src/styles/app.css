@@ -7904,3 +7904,9 @@ button.image-lora__word:hover:not(:disabled) { border-color: var(--st-accent); }
 .token-usage__rate { display: grid; gap: 3px; }
 .token-usage__rate-box { display: inline-flex; align-items: center; gap: 4px; }
 .token-usage__window { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.token-usage__model { font: inherit; color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; background: none; border: 0; padding: 0; }
+.token-usage__model:hover { color: var(--st-accent-text); }
+.token-usage__edited { margin-left: 6px; }
+.token-usage__costs tr[data-open="true"] td { background: color-mix(in srgb, var(--st-accent) 5%, transparent); }
+.token-usage__edit { display: grid; gap: 8px; padding: 6px 2px 10px; }
+.token-usage__edit .row { gap: 8px; }

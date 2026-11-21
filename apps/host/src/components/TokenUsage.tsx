@@ -2,23 +2,23 @@
  * The Monitor's token usage card: what the agent's model calls read and wrote (cache hits, cache misses, output), from the Harness's own
  * logs (server/token-usage.mjs), and what the same tokens would cost on popular cloud models or at prices the person types in.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { localeTag, tr } from '../lib/i18n';
 import { api } from '../lib/client';
 import { tokens } from '../lib/format';
-import { Select, Seg } from './ui';
+import { Btn, Select, Seg } from './ui';
 import {
-  PRICE_PRESETS, DEFAULT_CUSTOM, byHour, customCost, presetCost, readCustom, sumCells, usageCells,
-  type CustomPrice, type Rates, type UsageRange, type UsageSnapshot,
+  PRICE_PRESETS, DEFAULT_CUSTOM, applyOverride, readOverrides, byHour, customCost, presetCost, readCustom, sumCells, usageCells,
+  type CustomPrice, type PriceOverride, type Rates, type UsageRange, type UsageSnapshot,
 } from '../lib/token-pricing';
 
 const PREFS = 'strata.tokenUsage.v1';
-interface Saved { session: string; range: UsageRange; costs: boolean; custom: CustomPrice }
+interface Saved { session: string; range: UsageRange; costs: boolean; custom: CustomPrice; overrides: Record<string, PriceOverride> }
 function loadSaved(): Saved {
   try {
     const v = JSON.parse(localStorage.getItem(PREFS) ?? 'null');
-    return { session: typeof v?.session === 'string' ? v.session : 'latest', range: ['today', 'week', 'all'].includes(v?.range) ? v.range : 'all', costs: v?.costs === true, custom: readCustom(v?.custom) };
-  } catch { return { session: 'latest', range: 'all', costs: false, custom: DEFAULT_CUSTOM }; }
+    return { session: typeof v?.session === 'string' ? v.session : 'latest', range: ['today', 'week', 'all'].includes(v?.range) ? v.range : 'all', costs: v?.costs === true, custom: readCustom(v?.custom), overrides: readOverrides(v?.overrides) };
+  } catch { return { session: 'latest', range: 'all', costs: false, custom: DEFAULT_CUSTOM, overrides: {} }; }
 }
 
 const usd = (n: number) => n.toLocaleString(localeTag(), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: n > 0 && n < 0.01 ? 4 : 2 });
@@ -46,6 +46,7 @@ export function TokenUsage() {
   const [data, setData] = useState<UsageSnapshot | null>(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState<Saved>(loadSaved);
+  const [editing, setEditing] = useState<string | null>(null);
   const update = (patch: Partial<Saved>) => setSaved(s => { const next = { ...s, ...patch }; try { localStorage.setItem(PREFS, JSON.stringify(next)); } catch { /* kept for this visit */ } return next; });
 
   useEffect(() => {
@@ -63,9 +64,11 @@ export function TokenUsage() {
   const cells = useMemo(() => usageCells(data, sessionId, saved.range), [data, sessionId, saved.range]);
   const sum = sumCells(cells), input = sum.miss + sum.hit, all = input + sum.out;
   const hourly = byHour(cells), peak = Math.max(1, ...hourly.map(h => h.miss + h.hit + h.out));
-  const costs = useMemo(() => saved.costs ? [...PRICE_PRESETS.map(p => ({ id: p.id, name: p.name, provider: p.provider, note: p.note, cost: presetCost(cells, p) })), { id: 'custom', name: saved.custom.name, provider: tr("Your prices"), note: saved.custom.offPeak ? tr("Off-peak prices from {0}:00 to {1}:00 on this PC's clock.", [String(saved.custom.start).padStart(2, '0'), String(saved.custom.end).padStart(2, '0')]) : undefined, cost: customCost(cells, saved.custom) }].sort((a, b) => b.cost.total - a.cost.total) : [], [saved.costs, saved.custom, cells]);
+  const costs = useMemo(() => saved.costs ? [...PRICE_PRESETS.map(base => { const p = applyOverride(base, saved.overrides[base.id]); return { id: p.id, name: p.name, provider: p.provider, note: p.note, preset: p, edited: !!saved.overrides[p.id], cost: presetCost(cells, p) }; }), { id: 'custom', name: saved.custom.name, provider: tr("Your prices"), note: saved.custom.offPeak ? tr("Off-peak prices from {0}:00 to {1}:00 on this PC's clock.", [String(saved.custom.start).padStart(2, '0'), String(saved.custom.end).padStart(2, '0')]) : undefined, preset: undefined, edited: false, cost: customCost(cells, saved.custom) }].sort((a, b) => b.cost.total - a.cost.total) : [], [saved.costs, saved.custom, saved.overrides, cells]);
   const maxCost = Math.max(0.000001, ...costs.map(c => c.cost.total));
   const setCustom = (patch: Partial<CustomPrice>) => update({ custom: { ...saved.custom, ...patch } });
+  const setOverride = (id: string, patch: PriceOverride) => update({ overrides: { ...saved.overrides, [id]: { ...saved.overrides[id], ...patch } } });
+  const resetOverride = (id: string) => { const next = { ...saved.overrides }; delete next[id]; update({ overrides: next }); };
 
   const options = [
     { value: 'latest', label: tr("Latest chat") },
@@ -110,10 +113,17 @@ export function TokenUsage() {
       <div className="token-usage__cost-toggle"><label className="row"><input type="checkbox" checked={saved.costs} onChange={e => update({ costs: e.target.checked })}/> <span className="small">{tr("Show what this would cost on a cloud model")}</span></label></div>
       {saved.costs ? <div className="token-usage__costs">
         <div className="st-tablewrap"><table className="st-table"><thead><tr><th>{tr("Model")}</th><th className="num">{tr("Cache misses")}</th><th className="num">{tr("Cache hits")}</th><th className="num">{tr("Output")}</th><th className="num">{tr("Total")}</th></tr></thead>
-          <tbody>{costs.map(c => <tr key={c.id} data-custom={c.id === 'custom' ? 'true' : undefined}>
-            <td><strong>{c.name}</strong> <span className="xs muted">{c.provider}</span>{c.note ? <small className="xs muted token-usage__note">{c.note}</small> : null}<div className="token-usage__cost-bar"><span style={{ width: `${(c.cost.total / maxCost) * 100}%` }}/></div></td>
+          <tbody>{costs.map(c => <Fragment key={c.id}><tr data-custom={c.id === 'custom' ? 'true' : undefined} data-open={editing === c.id ? 'true' : undefined}>
+            <td>{c.preset ? <button type="button" className="text-btn token-usage__model" aria-expanded={editing === c.id} title={tr("Change this model's prices")} onClick={() => setEditing(editing === c.id ? null : c.id)}><strong>{c.name}</strong></button> : <strong>{c.name}</strong>} <span className="xs muted">{c.provider}</span>{c.edited ? <span className="st-badge token-usage__edited">{tr("Your prices")}</span> : null}{c.note ? <small className="xs muted token-usage__note">{c.note}</small> : null}<div className="token-usage__cost-bar"><span style={{ width: `${(c.cost.total / maxCost) * 100}%` }}/></div></td>
             <td className="num">{usd(c.cost.miss)}</td><td className="num">{usd(c.cost.hit)}</td><td className="num">{usd(c.cost.out)}</td><td className="num"><strong>{usd(c.cost.total)}</strong></td>
-          </tr>)}</tbody></table></div>
+          </tr>{c.preset && editing === c.id ? <tr className="token-usage__edit-row"><td colSpan={5}><div className="token-usage__edit">
+            <p className="xs muted">{tr("{0} prices in US dollars per million tokens. Your changes are kept on this device.", [c.name])}</p>
+            {c.preset.offPeak ? <span className="small">{tr("Peak")}</span> : c.preset.long ? <span className="small">{tr("Prompts up to {0} tokens", [tokens(c.preset.long.above)])}</span> : null}
+            <RatesRow rates={c.preset.rates} onChange={rates => setOverride(c.id, { rates })}/>
+            {c.preset.offPeak ? <><span className="small">{tr("Off-peak")}</span><RatesRow rates={c.preset.offPeak.rates} onChange={offRates => setOverride(c.id, { offRates })}/></> : null}
+            {c.preset.long ? <><span className="small">{tr("Prompts above {0} tokens", [tokens(c.preset.long.above)])}</span><RatesRow rates={c.preset.long.rates} onChange={longRates => setOverride(c.id, { longRates })}/></> : null}
+            <div className="row">{c.edited ? <Btn size="sm" onClick={() => resetOverride(c.id)}>{tr("Use list prices")}</Btn> : null}<Btn size="sm" variant="primary" onClick={() => setEditing(null)}>{tr("Done")}</Btn></div>
+          </div></td></tr> : null}</Fragment>)}</tbody></table></div>
         <div className="token-usage__custom">
           <div className="row row--between"><h3 className="h5">{tr("Your own prices")}</h3><input className="st-input" aria-label={tr("Custom price name")} value={saved.custom.name} maxLength={60} onChange={e => setCustom({ name: e.target.value })}/></div>
           <p className="xs muted">{tr("US dollars per million tokens.")}</p>
