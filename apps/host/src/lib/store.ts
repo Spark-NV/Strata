@@ -3,6 +3,7 @@ import { shortTitle } from './title-text';
 import { DEFAULT_CONTENT_FS, DEFAULT_UI_SCALE, SIZE_DEFAULTS_VERSION, savedSizes } from './default-sizes';
 import { detectLanguage } from './language-detect';
 import { validWhileBusy, type WhileBusy } from './while-busy';
+import { validThoughtsView, type ThoughtsView } from './thoughts';
 import { addToQuotes, type Quote } from './quotes';
 import { readAsk, type AgentAnswer, type AgentAsk } from './agent-ask';
 import { plainFailure, plainFailureText } from './plain-errors';
@@ -108,6 +109,10 @@ export interface AppState {
   doneSound: boolean;
   /** Opt-in: a desktop notification when Manual mode waits for an approval (#3477). */
   approvalNotify: boolean;
+  /** Where the model's thinking is shown: the closed line above the reply, live in a side panel, or not at all. */
+  thoughtsView: ThoughtsView;
+  /** An activity line ("Ran 11 commands") opens to list each command and what it printed. */
+  commandDetails: boolean;
   /** What Enter does while an answer is being written: wait, send after, or interrupt (#4783). */
   whileBusy: WhileBusy;
   /** Governs anonymous usage reporting. Nothing is sent in this build; the
@@ -155,6 +160,8 @@ export interface AppState {
   agentAsks: Record<string, AgentAsk[]>;
   /** Chats with a turn in flight. `streaming` is about the open chat; this is about all of them. */
   liveChats: number;
+  /** Chats the host says have a turn running, whether or not this page follows it (checked every few seconds). */
+  hostTurns: string[];
   toasts: Toast[];
   /** Files the model has been granted read access to, and when. */
   touchedPaths: Record<string, string>;
@@ -196,6 +203,8 @@ export interface Prefs {
   electricityCurrency: string;
   doneSound: boolean;
   approvalNotify: boolean;
+  thoughtsView: ThoughtsView;
+  commandDetails: boolean;
   /** What Enter does while an answer is being written: wait, send after, or interrupt (#4783). */
   whileBusy: WhileBusy;
   /** Governs anonymous usage reporting. Nothing is sent in this build; the
@@ -219,6 +228,8 @@ const PREFS_DEFAULTS: Prefs = {
   electricityCurrency: '',
   doneSound: false,
   approvalNotify: false,
+  thoughtsView: 'inline',
+  commandDetails: true,
   whileBusy: 'wait',
   shareTelemetry: false,
 };
@@ -285,6 +296,8 @@ function loadPrefs(): Prefs {
         electricityCurrency: typeof parsed.electricityCurrency === 'string' && /^[A-Za-z]{3}$/.test(parsed.electricityCurrency) ? parsed.electricityCurrency.toUpperCase() : '',
         doneSound: parsed.doneSound === true,
         approvalNotify: parsed.approvalNotify === true,
+        thoughtsView: validThoughtsView(parsed.thoughtsView) ? parsed.thoughtsView : 'inline',
+        commandDetails: parsed.commandDetails !== false,
         whileBusy: validWhileBusy(parsed.whileBusy) ? parsed.whileBusy : 'wait',
       };
     } catch {
@@ -324,6 +337,8 @@ let state: AppState = {
   electricityCurrency: prefs.electricityCurrency,
   doneSound: prefs.doneSound,
   approvalNotify: prefs.approvalNotify,
+  thoughtsView: prefs.thoughtsView,
+  commandDetails: prefs.commandDetails,
   whileBusy: prefs.whileBusy,
   parked: {},
   quotes: {},
@@ -358,6 +373,7 @@ let state: AppState = {
   activeSession: null,
   streaming: false,
   liveChats: 0,
+  hostTurns: [],
   toasts: [],
   touchedPaths: (() => {
     try {
@@ -620,6 +636,8 @@ function savePrefs() {
     electricityCurrency: state.electricityCurrency,
     doneSound: state.doneSound,
     approvalNotify: state.approvalNotify,
+    thoughtsView: state.thoughtsView,
+    commandDetails: state.commandDetails,
     whileBusy: state.whileBusy,
     shareTelemetry: state.shareTelemetry,
   };
@@ -801,6 +819,16 @@ export function setDoneSound(doneSound: boolean) {
 
 export function setApprovalNotify(approvalNotify: boolean) {
   set({ approvalNotify });
+  savePrefs();
+}
+
+export function setThoughtsView(thoughtsView: ThoughtsView) {
+  set({ thoughtsView });
+  savePrefs();
+}
+
+export function setCommandDetails(commandDetails: boolean) {
+  set({ commandDetails });
   savePrefs();
 }
 
@@ -1779,10 +1807,51 @@ function markTurn(sessionId: string, turn: { abort: AbortController; agent: bool
  */
 export function stopStreaming() {
   const id = state.activeSession;
-  const turn = id ? liveTurns.get(id) : undefined;
-  if (!id || !turn) return;
+  if (id) stopChat(id);
+}
+
+/**
+ * Stop a turn this page does not follow (the stream was lost, so there is no reply to abort): the host ends it hard. The page then
+ * takes the chat's end over (the reply's text so far) and the chat takes a new message.
+ */
+function hardStopHost(id: string) {
+  void api.post<{ stopped: boolean; reason?: string }>('/api/chat/stop', { sessionId: id, force: true }).then(
+    result => {
+      void checkHostTurns();
+      if (!result.stopped && result.reason !== 'no active turn') pushToast('error', 'The chat did not stop', 'Try Stop again in a moment.');
+    },
+    e => pushToast('error', 'The chat did not stop', plainFailureText(e instanceof Error ? e.message : String(e)).message),
+  );
+}
+
+let hostTurnsTimer: ReturnType<typeof setInterval> | undefined;
+const reattached = new Set<string>();
+/**
+ * Ask the host which chats have a turn running. A chat whose turn this page does not follow is taken over again (its Stop button, its
+ * live text), once per turn; `hostTurns` lets the message box show Stop even before that is done.
+ */
+export async function checkHostTurns() {
+  let turns: { chatId: string; requestId?: string }[];
+  try { turns = (await api.get<{ turns: { chatId: string; requestId?: string }[] }>('/api/chat/active')).turns; } catch { return; }
+  const ids = turns.map(t => t.chatId);
+  if (ids.join('\n') !== state.hostTurns.join('\n')) set({ hostTurns: ids });
+  for (const t of turns) {
+    const key = `${t.chatId}:${t.requestId ?? ''}`;
+    if (liveTurns.has(t.chatId) || reattached.has(key) || !state.sessions.some(s => s.id === t.chatId)) continue;
+    reattached.add(key);
+    void sendMessage('', { reattach: t.chatId });
+  }
+}
+function watchHostTurns() {
+  if (hostTurnsTimer) return;
+  hostTurnsTimer = setInterval(() => { if (document.visibilityState === 'visible' && state.connection !== 'offline') void checkHostTurns(); }, 5000);
+}
+
+function stopFollowed(id: string) {
+  const turn = liveTurns.get(id);
+  if (!turn) return;
   const abort = () => { turn.abort.abort(); };
-  void api.post<{ stopped: boolean }>('/api/chat/stop', { sessionId: id }).then(
+  void api.post<{ stopped: boolean }>('/api/chat/stop', { sessionId: id, force: true }).then(
     result => {
       if (!result.stopped) abort();
       // An agent turn that was told to stop but is slow to end must not leave the chat stuck.
@@ -1937,6 +2006,31 @@ export function rewindTo(messageId: string): string | null {
   return prompt;
 }
 
+/**
+ * Delete one message from the open chat (the × on a message). A message you sent takes with it the error reply right under it (the
+ * "This chat is still working" kind), which has no answer in it. Later messages are kept. The toast can put it back.
+ * What is deleted is no longer sent as earlier conversation. An agent chat's own memory of a message that reached the model stays.
+ */
+export function deleteMessage(messageId: string) {
+  const sessionId = state.activeSession;
+  const source = state.sessions.find(s => s.id === sessionId);
+  const at = source?.messages.findIndex(m => m.id === messageId) ?? -1;
+  if (!sessionId || !source || at < 0 || source.messages[at].streaming) return;
+  const next = source.messages[at + 1];
+  const takeReply = source.messages[at].role === 'user' && next?.role === 'assistant' && !next.streaming && !!next.error && !next.content.trim();
+  const removed = source.messages.slice(at, takeReply ? at + 2 : at + 1);
+  const ids = new Set(removed.map(m => m.id));
+  patchSession(sessionId, s => ({ ...s, messages: s.messages.filter(m => !ids.has(m.id)) }));
+  pushToast('info', removed.length > 1 ? 'Message and its error deleted' : 'Message deleted', undefined, {
+    label: 'Undo',
+    run: () => patchSession(sessionId, s => {
+      if (s.messages.some(m => ids.has(m.id))) return s;
+      const before = at <= s.messages.length ? at : s.messages.length;
+      return { ...s, messages: [...s.messages.slice(0, before), ...removed, ...s.messages.slice(before)] };
+    }),
+  });
+}
+
 export function exportConversation() {
   const session = state.sessions.find(s => s.id === state.activeSession);
   if (!session) return;
@@ -1985,15 +2079,13 @@ export function loopIsRunning(sessionId: string | null): boolean { return loopSc
 export function liveChatIds(): string[] { return [...liveTurns.keys()]; }
 export function loopChatIds(): string[] { return loopScheduler.ids(); }
 
-/** Stop any chat's turn, not only the open one (the board's Stop). Same two-step as stopStreaming. */
+/**
+ * Stop any chat's turn, not only the open one (the board's Stop, the message box's Stop). Always a hard stop: a turn this page follows is
+ * stopped by the host and then let go here; one it lost track of is stopped by the host alone.
+ */
 export function stopChat(id: string) {
-  const turn = liveTurns.get(id);
-  if (!turn) return;
-  const abort = () => { turn.abort.abort(); };
-  void api.post<{ stopped: boolean }>('/api/chat/stop', { sessionId: id }).then(
-    result => { if (!result.stopped) abort(); else setTimeout(() => { if (liveTurns.get(id) === turn) abort(); }, 30000); },
-    abort,
-  );
+  if (liveTurns.has(id)) stopFollowed(id);
+  else hardStopHost(id);
 }
 
 /** Stop a chat's loop from the board. The chat gets the same line /loop stop writes. */
@@ -2199,6 +2291,8 @@ export async function sendMessage(text: string, options: { fromLoop?: boolean; g
         thinkingBudget:state.sessions.find(s=>s.id===sessionId)?.preferences?.thinkingBudget??0,
         // The Mode menu's choice for this chat, read when the turn starts; the host applies it to the agent.
         mode:state.sessions.find(s=>s.id===sessionId)?.preferences?.mode??'manual',
+        // "Interrupt the answer": a turn still running for this chat (one this page lost track of included) is stopped hard first.
+        ...(state.whileBusy==='interject'?{interrupt:true}:{}),
         // So a skill narrowed to another workspace does not fire here.
         workspaceId: workspaceIdForSession(state.workspaces, state.sessions.find(s => s.id === sessionId)) ?? state.activeWorkspace,
       },
@@ -2315,6 +2409,8 @@ export async function sendMessage(text: string, options: { fromLoop?: boolean; g
           if (Number.isFinite(used) && used > 0) patchAssistant((m) => ({ ...m, contextUsed: used, ...(Number.isFinite(max) && max > 0 ? { contextMax: max } : {}) }));
         } else if (type === 'error') {
           clearStatus(sessionId);
+          // The host still runs a turn for this chat that this page lost track of: take it over again so its Stop button shows.
+          if (frame.code === 'turn-active') { for (const k of [...reattached]) if (k.startsWith(`${sessionId}:`)) reattached.delete(k); setTimeout(() => void checkHostTurns(), 300); }
           // A sentence the host wrote for the person (it carries its catalog key) is shown in their language as it is; anything else is made plain here.
           const said = typeof frame.key === 'string' ? tr(frame.key, Array.isArray(frame.values) ? frame.values : undefined) : plainFailure(String(frame.message ?? 'Engine error')).message;
           patchAssistant((m) => ({ ...m, drafts: undefined, error: said, streaming: false, ...(typeof frame.code === 'string' ? { errorCode: frame.code } : {}), ...(typeof frame.details === 'string' && frame.details ? { errorDetail: frame.details } : {}) }));
@@ -2479,6 +2575,7 @@ async function resumeSessions() {
     set({ sessions });
   }
   await takeOverTurns();
+  watchHostTurns();
   void reconcileAgentTools();
 }
 

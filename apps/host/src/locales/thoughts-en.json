@@ -1,0 +1,23 @@
+{
+ "th01": "Thinking · updates live",
+ "th02": "Last reply",
+ "th03": "Nothing yet",
+ "th04": "Model thinking",
+ "th05": "The model’s thinking shows here while it works.",
+ "th06": "In the reply: a closed line above each answer that opens to the thinking. Live in a side panel: the thinking appears on the right as the model writes it. Hidden: not shown.",
+ "th07": "Show each command",
+ "th08": "A click on a line such as “Ran 11 commands” lists every command, and each one opens to what it printed.",
+ "th09": "Chat activity",
+ "th10": "In the reply",
+ "th11": "Live in a side panel",
+ "th12": "Hidden",
+ "th13": "No output.",
+ "th14": "Running…",
+ "th15": "Delete message",
+ "th16": "Message deleted",
+ "th17": "Message and its error deleted",
+ "th18": "Undo",
+ "th19": "Stop this chat now",
+ "th20": "The chat did not stop",
+ "th21": "Try Stop again in a moment."
+}

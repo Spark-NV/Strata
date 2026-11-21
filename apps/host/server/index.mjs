@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createTokenUsage } from './token-usage.mjs';
 import { engineProgressMark } from './agent/engine-progress.mjs';
 import './system-ca.mjs';        // #3722: the operating system's certificates, before any HTTPS request
 import { createCloudflare } from './cloudflare.mjs';
@@ -249,6 +250,8 @@ async function pictureRefusal(connection, model) {
   return `"${model.name}" is set not to read pictures (or its server says it cannot: a llama-server started without --mmproj, or a text-only model). If that is wrong, ${fix}. Otherwise choose a model that reads pictures.`;
 }
 const VIBE_STATE_DIR = join(store.DATA_DIR, 'vibe');
+/** The agent's model calls and their tokens, read from the Harness's own logs, for the Monitor's token usage card. */
+const tokenUsage = createTokenUsage({ home: join(store.DATA_DIR, 'agent', 'home'), sessionsFile: join(store.DATA_DIR, 'agent', 'sessions.json'), chats: () => chatStore.list().chats });
 const agent = createAgentBridge({
   profilePolicyFile: profileStore.policyFile,
   // Vibe chats: the run state of each project (never in the project itself) and the shared folder a Vibe project must not be.
@@ -784,6 +787,11 @@ async function runAgentTurn({ res, send = null, controller, chatId, body, messag
   // `send` (a persisted turn) takes the frames instead of a response.
   const write = send ?? (frame => { if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(frame)}\n`); });
   const cwd = chatFolders.get(chatId) ?? (workspaceId ? workspaces.find(w => w.id === workspaceId)?.path : null) ?? WORKSPACE;
+  // "Interrupt the answer" (Settings → General): a message sent while this chat still has a turn running stops that turn hard first,
+  // even when the page lost track of it (a reload, a dropped stream) and shows no Stop button.
+  if (body.interrupt === true && agent.isRunning(chatId)) {
+    try { await agent.stop(chatId, { force: true }); } catch (e) { console.warn(`agent · interrupt before a new message failed: ${e.message}`); }
+  }
   let choice, instance = null;
   if (body.remoteModel) {
     choice = { connectionId: String(body.remoteModel.connectionId), modelId: String(body.remoteModel.modelId) };
@@ -1890,6 +1898,7 @@ async function api(req, res, path, method, url) {
   if (cancelMatch && method === 'POST') return json(res, 200, serving.cancel(cancelMatch[1]));
 
   // --- monitor ------------------------------------------------------------
+  if (path === '/api/usage/tokens' && method === 'GET') return json(res, 200, await tokenUsage.snapshot());
   if (path === '/api/monitor') { monitor.watch(); if (url.searchParams.get('drives') === '1') monitor.watchDrives(); return json(res, 200, monitor.snapshot()); }
 
   // --- skills / workspace -------------------------------------------------
@@ -2477,7 +2486,7 @@ async function api(req, res, path, method, url) {
     // A persisted turn that is not the agent's (plain chat, roleplay, a picture): stopped here. An agent turn is stopped by the agent below.
     if (!agent.isRunning(b.sessionId)) { const own = persisted.stop(b.sessionId); if (own) return json(res, 200, await own); }
     try {
-      const result = await agent.stop(b.sessionId);
+      const result = await agent.stop(b.sessionId, { force: b.force === true });
       // Nothing running: Stop sent again after the turn ended (a retry on a weak connection) says how the last turn ended.
       if (result?.stopped === false) { const last = turnLedger.lastFor(b.sessionId); if (last) return json(res, 200, { ...result, already: true, state: last.state, turnId: last.turnId }); }
       return json(res, 200, result);

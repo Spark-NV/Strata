@@ -4,7 +4,8 @@ import { deliveryFolder, dirOf, fileAction, fileSize, fileTypeLabel, previewOf, 
 import { useChatFolder } from '../lib/chat-folder';
 import type { PreviewArtifact } from '../lib/artifacts';
 import { draftSize, groupFromDraft } from '../lib/draft-view';
-import type { ToolDraft } from '../lib/types';
+import type { ToolCall, ToolDraft } from '../lib/types';
+import { stepOutput, stepText } from '../lib/thoughts';
 import { pushToast } from '../lib/store';
 import { plainFailureText } from '../lib/plain-errors';
 import { FloatingMenu } from './FloatingMenu';
@@ -106,26 +107,51 @@ export function SkillsUsed({ skills }: { skills: { name: string; description: st
   </div>;
 }
 
-/** A run of tool use between two pieces of text, as one quiet line: "Ran 2 commands, read monitor.png", with a thumbnail when it touched a picture. */
-export function ActivityLine({ group, sessionId, onPreview }: { group: ActivityGroup; sessionId: string; onPreview: (a: PreviewArtifact) => void }) {
+/**
+ * A run of tool use between two pieces of text, as one quiet line: "Ran 2 commands, read monitor.png", with a thumbnail when it touched a picture.
+ * `steps` (the line's own tool cards, given when "Show each command" is on): opened, the line lists every step, and each step opens to its output.
+ */
+export function ActivityLine({ group, sessionId, onPreview, steps = [] }: { group: ActivityGroup; sessionId: string; onPreview: (a: PreviewArtifact) => void; steps?: ToolCall[] }) {
   const [open, setOpen] = useState(false);
+  const canOpen = group.files.length > 0 || steps.length > 0;
   const picture = group.files.find(f => f.kind === 'image');
   // The host's sentence may end with the numbers ("… +225 −0"): they are drawn as figures instead.
   const sentence = group.line.replace(/\s*\+\d+\s*[−-]\s*\d+\s*$/, '');
   // While the run is open this is the live step: the host's own words for it when it sends them, else the line it already had.
   const live = !group.closed;
   return <><div className="act" data-open={open || undefined} data-live={live || undefined}>
-    <button type="button" className="act__line" aria-expanded={open} disabled={!group.files.length} onClick={() => setOpen(v => !v)}>
+    <button type="button" className="act__line" aria-expanded={open} disabled={!canOpen} onClick={() => setOpen(v => !v)}>
       <span>{live && group.live?.label ? group.live.label : sentence}</span>{live && group.live?.bytes ? <span className="act__meta">{draftSize(group.live.bytes)}{group.live.lines && group.live.lines > 1 ? <> {"\u00B7"} {tr("{0} lines", [group.live.lines])}</> : null}</span> : null}{group.added || group.removed ? <Plusminus added={group.added} removed={group.removed}/> : null}
-      {group.files.length ? <Icon name="chevron" size={14} className="act__chev"/> : null}
+      {canOpen ? <Icon name="chevron" size={14} className="act__chev"/> : null}
       {!group.closed ? <span className="act__live" aria-hidden="true"/> : null}
     </button>
     {picture ? <img className="act__thumb" src={rawUrlOf(sessionId, picture.path)} alt="" loading="lazy" onClick={() => void showOf(picture, sessionId, onPreview)}/> : null}
-    {open ? <ul className="act__files">{group.files.map(f => <li key={f.path}><button type="button" onClick={() => void showOf(f, sessionId, onPreview, f.kind)}><Icon name="file" size={14}/>{f.name}{f.added || f.removed ? <Plusminus added={f.added} removed={f.removed}/> : null}</button></li>)}</ul> : null}
+    {open && steps.length ? <ol className="act__steps">{steps.map(t => <StepRow key={t.id} tool={t}/>)}</ol> : null}
+    {open && group.files.length ? <ul className="act__files">{group.files.map(f => <li key={f.path}><button type="button" onClick={() => void showOf(f, sessionId, onPreview, f.kind)}><Icon name="file" size={14}/>{f.name}{f.added || f.removed ? <Plusminus added={f.added} removed={f.removed}/> : null}</button></li>)}</ul> : null}
   </div>
     {live && group.live?.output ? <p className="act__output" title={group.live.output}>{group.live.output}</p> : null}
     {live && group.live?.tail !== undefined ? <div className="act__tail" aria-hidden="true">{group.live.tail.split('\n').filter(Boolean).map((line, i) => <span key={i}>{line}</span>)}</div> : null}
   </>;
+}
+
+/** One step of an opened activity line: what it was ("Ran a command · ls -la"), and opened, the whole command and what it printed. */
+function StepRow({ tool: t }: { tool: ToolCall }) {
+  const text = stepText(t), out = stepOutput(t);
+  const failed = t.state === 'error' || t.state === 'denied';
+  return <li className="act__step" data-state={t.state}>
+    <details>
+      <summary title={text}>
+        <Icon name={failed ? 'x' : t.scope === 'shell' ? 'bolt' : 'tool'} size={13}/>
+        <span className="act__step-verb">{tr(t.verb ?? t.name)}</span>
+        {text ? <code className="act__step-text">{text}</code> : null}
+        {t.state === 'running' ? <span className="act__live" aria-hidden="true"/> : null}
+      </summary>
+      <div className="act__step-body">
+        {text ? <pre className="act__step-cmd">{text}</pre> : null}
+        {out ? <pre className="act__step-out">{out}</pre> : <p className="xs muted">{tr(t.state === 'running' ? 'Running…' : 'No output.')}</p>}
+      </div>
+    </details>
+  </li>;
 }
 
 /** The value, at most every `ms` (a file arrives about five times a second; the eye needs two). A cleared value is shown at once. */

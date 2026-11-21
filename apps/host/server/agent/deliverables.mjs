@@ -218,11 +218,11 @@ export function groupLine(counts, added, removed) {
 
 export class ActivityGroups {
   constructor({ emit, tracker = null }) { this.emit = emit; this.tracker = tracker; this.seq = 0; this.current = null; this.seen = new Set(); }
-  #open() { if (!this.current) this.current = { id: `g${++this.seq}`, counts: {}, files: new Map(), added: 0, removed: 0, tools: 0 }; return this.current; }
+  #open() { if (!this.current) this.current = { id: `g${++this.seq}`, counts: {}, files: new Map(), added: 0, removed: 0, tools: 0, ids: [] }; return this.current; }
   #send(closed) {
     const g = this.current; if (!g) return;
     const files = [...g.files.values()];
-    this.emit({ type: 'activity-group', id: g.id, closed, counts: { ...g.counts }, files, added: g.added, removed: g.removed, tools: g.tools, line: groupLine(g.counts, g.added, g.removed) });
+    this.emit({ type: 'activity-group', id: g.id, closed, counts: { ...g.counts }, files, added: g.added, removed: g.removed, tools: g.tools, toolIds: [...g.ids], line: groupLine(g.counts, g.added, g.removed) });
   }
   /** A tool card frame (every state change). Counted once, when it is done or has failed. */
   card(tool, deliverable = null) {
@@ -231,7 +231,7 @@ export class ActivityGroups {
     this.seen.add(tool.id);
     if (tool.state === 'denied') return;
     const g = this.#open(); const kind = KIND_OF(tool.name);
-    g.counts[kind] = (g.counts[kind] ?? 0) + 1; g.tools += 1;
+    g.counts[kind] = (g.counts[kind] ?? 0) + 1; g.tools += 1; g.ids.push(tool.id);
     if (deliverable) this.#file(deliverable, false);
     this.#send(false);
   }

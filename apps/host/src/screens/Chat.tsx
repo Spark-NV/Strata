@@ -48,13 +48,15 @@ import { VibeStart, pickVibeFolder } from '../components/VibeStart';
 import { useChatFolder } from '../lib/chat-folder';
 import { OPEN_VIBE_INBOX, VibeInbox, useVibeWaiting } from '../components/VibeInbox';
 import { HelperConversation, OPEN_HELPER_CONVERSATION, helperTabId, type HelperRef } from '../components/HelperConversation';
+import { ThoughtsPanel } from '../components/ThoughtsPanel';
+import { groupTools, thoughtsReply, thoughtsTabId } from '../lib/thoughts';
 import { RpEditor } from '../components/RpEditor';
 import '../lib/rp';
 import { Btn, Icon, IconBtn, ErrorNotice, type IconName } from '../components/ui';
 import { composerCap, scrollBehavior } from '../lib/responsive';
 import { relTime, cx, duration, tokens, tps } from '../lib/format';
 import { ImageControls, ImageEmpty, ImageReply, PictureStrip } from '../components/ImageChat';
-import { profileOf, wakeImage, wakePinned, addQuote, clearQuotes, removeQuote, createSubagentExample, parkMessage, takeParked, pushToast, setPreviewTabClosed, branchFrom, continueLast, markRead, retryLast, selectSession, rewindTo, sendMessage, stopStreaming, useStore, } from '../lib/store';
+import { profileOf, wakeImage, wakePinned, addQuote, clearQuotes, removeQuote, createSubagentExample, parkMessage, takeParked, pushToast, setPreviewTabClosed, branchFrom, continueLast, markRead, retryLast, selectSession, rewindTo, sendMessage, stopStreaming, useStore, deleteMessage, } from '../lib/store';
 import { CopyBtn, CopyMenuItem, MenuCloseContext } from '../components/CopyBtn';
 import { KEYS_UP, PILL_DISTANCE, distanceFromBottom, followAfterScroll, wheelLeavesBottom } from '../lib/follow-scroll';
 import { getSlashCommands } from '../lib/commands';
@@ -200,12 +202,20 @@ export function ChatScreen() {
     }, []);
     const helperTab = helperView ? [{ id: helperTabId(helperView.id), title: helperView.name, icon: 'experts' as const, controls: 'helper-content' }] : [];
     const helperShown = !!helperView && selectedPreview === helperTabId(helperView.id);
-    const extraTabs = [...runTabs, ...planTab, ...vibeTab, ...helperTab];
+    // The model's thinking, live (Settings → Appearance → Chat activity): its own tab, opened when a reply starts thinking unless another tab is open.
+    const thoughtsView = useStore(s => s.thoughtsView);
+    const thoughtsId = session ? thoughtsTabId(session.id) : '';
+    const thoughtsOf = thoughtsView === 'panel' ? thoughtsReply(session?.messages) : null;
+    const thoughtsShown = thoughtsView === 'panel' && !!session && selectedPreview === thoughtsId;
+    const thoughtsTab = thoughtsView === 'panel' && (thoughtsOf || thoughtsShown) ? [{ id: thoughtsId, title: 'Thinking', icon: 'thinking' as const, controls: 'thoughts-content' }] : [];
+    const thinkingReplyId = thoughtsOf?.streaming && thoughtsOf.reasoning ? thoughtsOf.id : '';
+    useEffect(() => { if (thinkingReplyId && thoughtsId && !selectedPreview) setSelectedPreview(thoughtsId); }, [thinkingReplyId]);
+    const extraTabs = [...runTabs, ...planTab, ...vibeTab, ...helperTab, ...thoughtsTab];
     const selectedRun = timeSkipRuns.find(run => timeSkipTabId(run.id) === selectedPreview);
-    const inlinePreview = splitWidth >= (selectedRun || planShown || vibeShown || helperShown ? 760 : 1120);
+    const inlinePreview = splitWidth >= (selectedRun || planShown || vibeShown || helperShown || thoughtsShown ? 760 : 1120);
     const paneWidth = previewWidth(splitWidth, previewFraction);
     const splitStyle = inlinePreview && selectedPreview && !expanded ? { gridTemplateColumns: `minmax(0,1fr) ${paneWidth}px` } : undefined;
-    const resizeHandle = !setupVisible && inlinePreview && selectedPreview && !expanded ? <PreviewResizeHandle container={splitRef} total={splitWidth} fraction={previewFraction} onChange={setPreviewFraction} controls={selectedRun ? 'time-skip-content' : planShown ? 'plan-content' : vibeShown ? 'vibe-content' : helperShown ? 'helper-content' : 'artifact-content'}/> : null;
+    const resizeHandle = !setupVisible && inlinePreview && selectedPreview && !expanded ? <PreviewResizeHandle container={splitRef} total={splitWidth} fraction={previewFraction} onChange={setPreviewFraction} controls={selectedRun ? 'time-skip-content' : planShown ? 'plan-content' : vibeShown ? 'vibe-content' : helperShown ? 'helper-content' : thoughtsShown ? 'thoughts-content' : 'artifact-content'}/> : null;
     const runCount = timeSkipRuns.length;
     const previewCount = session?.messages.reduce((n, m) => n + (m.artifacts?.length ?? 0), 0) ?? 0;
     useEffect(() => { const items = [...new Map((session?.messages.flatMap(m => m.artifacts ?? []) ?? []).map(a => [a.id, a])).values()]; setPreviews(items.filter(a => !session?.closedPreviews?.includes(a.id))); setSelectedPreview(session && previewsDeferred(session.id) || session?.closedPreviews?.includes(session.previewOpen ?? '') ? null : session?.previewOpen?.startsWith('time-skip:') && !timeSkipRuns.some(r => timeSkipTabId(r.id) === session.previewOpen) ? null : session?.previewOpen ?? null); }, [session?.id]);
@@ -586,7 +596,8 @@ export function ChatScreen() {
         {tr(!setupVisible && planShown ? <PlanPanel chatId={session?.id}/> : null)}
         {!setupVisible && vibeShown && session ? <VibeInbox session={session} onClose={() => setSelectedPreview(null)}/> : null}
         {!setupVisible && helperShown && session && helperView ? <HelperConversation session={session} helper={helperView} onClose={() => { setHelperView(null); setSelectedPreview(null); }}/> : null}
-        <ArtifactPanel items={previews} onCloseTab={closeTab} selected={setupVisible || planShown || vibeShown || helperShown ? null : selectedPreview} onSelect={selectPreview} onClose={() => setSelectedPreview(null)} inline={inlinePreview}/>
+        {!setupVisible && thoughtsShown && session ? <ThoughtsPanel session={session} onClose={() => setSelectedPreview(null)}/> : null}
+        <ArtifactPanel items={previews} onCloseTab={closeTab} selected={setupVisible || planShown || vibeShown || helperShown || thoughtsShown ? null : selectedPreview} onSelect={selectPreview} onClose={() => setSelectedPreview(null)} inline={inlinePreview}/>
         {tr(resizeHandle)}
       </div>
     </>);
@@ -666,6 +677,8 @@ function Composer({ draft, setDraft, loaded, streaming, onSubmit, onKey, session
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
     const clearDraft = useCallback(() => setDraft(''), [setDraft]);
+    // The host runs a turn for this chat that the page lost track of (a dropped stream): Stop shows anyway, and stops it hard.
+    const hostWorking = useStore(s => !!session && s.hostTurns.includes(session.id));
     const photos = useChatPhotos(session?.id), native = useNative();
     // An Image chat draws with the image model (image-chat.ts), not a text model.
     const image = session?.profile === 'image', imageReady = useStore(s => !!s.imageModel?.enabled);
@@ -764,7 +777,7 @@ function Composer({ draft, setDraft, loaded, streaming, onSubmit, onKey, session
         }}/>}
           <div className="st-composer__bar">
             {image ? <ImageControls session={session} disabled={streaming} draft={draft} onDraft={setDraft}/> : <ComposerControls draft={draft} onDraft={setDraft} session={session} onPreview={onPreview} streaming={streaming} onSlash={() => { setSlashDismissed(false); setSlashOpen(true); requestAnimationFrame(() => textareaRef.current?.focus()); }} onError={setFileError} onAttach={(name, text) => { setDraft(`${draft}${draft ? '\n\n' : ''}Attached ${name}\n\n${text}`); requestAnimationFrame(() => textareaRef.current?.focus()); }}/>}
-            {tr(streaming ? (<Btn variant="secondary" size="sm" icon="stop" onClick={stopStreaming}>{tr("Stop")}</Btn>) : (<Btn variant="primary" size="sm" icon="send" disabled={(!draft.trim() && !photos.length) || draft.trim() === '/' || (!canChat && timeSkipPrompt(draft) === null)} onClick={onSubmit}>{tr("Send")}</Btn>))}
+            {tr(streaming || hostWorking ? (<Btn variant="secondary" size="sm" icon="stop" onClick={stopStreaming} title={tr("Stop this chat now")}>{tr("Stop")}</Btn>) : (<Btn variant="primary" size="sm" icon="send" disabled={(!draft.trim() && !photos.length) || draft.trim() === '/' || (!canChat && timeSkipPrompt(draft) === null)} onClick={onSubmit}>{tr("Send")}</Btn>))}
           </div>
         </div>
         {tr(streaming && draft.trim() && whileBusy !== 'wait' ? <p className="xs muted composer__busy-hint" role="status">{tr(whileBusy === 'queue' ? "Enter sends it when the answer is done." : "Enter stops the answer here and sends it now.")}</p> : null)}
@@ -799,6 +812,8 @@ function MessageView({ message: m, isLast, onEditPrompt, onPreview, onClosePrevi
 }) {
     const streaming = useStore(s => s.streaming);
     const activeSession = useStore(s => s.activeSession);
+    const thoughtsView = useStore(s => s.thoughtsView);
+    const commandDetails = useStore(s => s.commandDetails);
     const hostLive = useStore(s => s.connection !== 'offline');
     const liveStatus = useLiveStatus(m.role === 'assistant' && m.streaming ? activeSession : null);
     // A reply that proposed a plan shows the plan card in place of its closing text (which is the plan in prose).
@@ -822,13 +837,14 @@ function MessageView({ message: m, isLast, onEditPrompt, onPreview, onClosePrevi
                 if (prompt !== null)
                     onEditPrompt(prompt);
             }}/>
+            <IconBtn name="x" title={tr("Delete message")} disabled={streaming && isLast} onClick={() => deleteMessage(m.id)}/>
             <MessageMenu label={tr("More message actions")}><button role="menuitem" className="menu__item" onClick={() => activeSession && addQuote(activeSession, m.content, m.id, 'user')}>{tr("Quote")}</button><button role="menuitem" className="menu__item" onClick={() => branchFrom(m.id)}><Icon name="branch"/>{tr("Branch from here")}</button></MessageMenu>
           </span>
         </div>
       </div>);
     }
     return (<div className="st-msg st-msg--assistant" data-message-id={m.id} data-error={m.error ? 'true' : undefined}>
-      {tr(m.reasoning ? <ReasoningBlock message={m}/> : null)}
+      {tr(m.reasoning && thoughtsView === 'inline' ? <ReasoningBlock message={m}/> : null)}
 
 
       {/* In a reply with activity lines the line is the one live cue for a running or finished tool (and the status line below says what it is doing now); the
@@ -838,7 +854,7 @@ function MessageView({ message: m, isLast, onEditPrompt, onPreview, onClosePrevi
       {tr(!(m.timeSkipId && timeSkipReal && !timeSkipDone) && (m.content || m.error || !m.streaming || !liveStatus || !!m.drafts?.length) ? <div className="st-bubble">
         {tr(planCard ? <PlanCard chatId={activeSession} planId={m.planId!}/> : null)}
         {tr(m.error ? (<ErrorNotice message={m.error} detail={m.errorDetail} {...contextRecovery(m.errorCode)}/>) : null)}
-        {tr(grouped && !planCard && !m.timeSkipId ? m.blocks!.map((b, i) => b.kind === 'group' ? <ActivityLine key={b.id} group={b} sessionId={activeSession ?? ''} onPreview={onPreview}/> : <Markdown key={i} text={b.text} onOpenLink={onOpenLink} imageSession={activeSession} previewId={`${m.id}-b${i}`} onPreview={onPreview} onClosePreview={onClosePreview}/>) : null)}
+        {tr(grouped && !planCard && !m.timeSkipId ? m.blocks!.map((b, i) => b.kind === 'group' ? <ActivityLine key={b.id} group={b} sessionId={activeSession ?? ''} onPreview={onPreview} steps={commandDetails ? groupTools(b.toolIds, m.tools) : undefined}/> : <Markdown key={i} text={b.text} onOpenLink={onOpenLink} imageSession={activeSession} previewId={`${m.id}-b${i}`} onPreview={onPreview} onClosePreview={onClosePreview}/>) : null)}
         {tr(m.content && !planCard && !grouped ? (<Markdown text={m.timeSkipId && !timeSkipReal ? hostLive ? tr('This was a sample run made while the app could not reach its host.') : timeSkipDone ? tr('The result is ready. Switch between Original and Updated, or compare them side by side. This example uses sample outputs and simulated checks.') : tr('Revising the saved draft. Follow the result in the sidebar. This example uses sample outputs and simulated checks.') : m.content} onOpenLink={onOpenLink} imageSession={activeSession} previewId={m.id} onPreview={onPreview} onClosePreview={onClosePreview}/>) : !m.error && m.streaming && !liveStatus ? (<span className="typing" aria-label={tr("Generating")}>
             <i />
             <i />
@@ -863,6 +879,7 @@ function MessageView({ message: m, isLast, onEditPrompt, onPreview, onClosePrevi
               <CopyBtn text={m.content} label="Response" title="Copy response"/>
               <IconBtn name="refresh" title={tr("Ask again")} onClick={() => void retryLast(m.id)}/>
             </> : null)}
+            <IconBtn name="x" title={tr("Delete message")} onClick={() => deleteMessage(m.id)}/>
             <MessageMenu label={tr("More response actions")}>
               {tr(!isLast ? <><CopyMenuItem text={m.content} label="Response">Copy response</CopyMenuItem><button role="menuitem" className="menu__item" onClick={() => void retryLast(m.id)}>{tr("Ask again")}</button></> : null)}
               {tr(isLast ? <button role="menuitem" className="menu__item" onClick={() => void continueLast()}>{tr("Continue")}</button> : null)}

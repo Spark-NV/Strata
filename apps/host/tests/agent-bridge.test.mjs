@@ -29,12 +29,12 @@ function cleanup(dir) {
 
 const lines = file => readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).length;
 
-async function rig(t, { connections = [], dataDir } = {}) {
+async function rig(t, { connections = [], dataDir, bridgeOptions = {} } = {}) {
   const worker = await startScriptedWorker({});
   const dir = dataDir ?? mkdtempSync(join(tmpdir(), 'strata-agent-'));
   const ws = join(dir, 'ws'); mkdirSync(ws, { recursive: true });
   const local = [{ id: 'inst-1', label: 'Scripted', baseUrl: worker.url, modelId: 'scripted-model', context: 32768 }];
-  const bridge = createAgentBridge({ dataDir: dir, localInstances: () => local, connections: () => connections, env: process.env, startTimeoutMs: 90_000 });
+  const bridge = createAgentBridge({ dataDir: dir, localInstances: () => local, connections: () => connections, env: process.env, startTimeoutMs: 90_000, ...bridgeOptions });
   t.after(async () => { await bridge.close(); await worker.close(); if (!dataDir) cleanup(dir); });
   const run = (chatId, message, opts = {}) => {
     const frames = [];
@@ -186,6 +186,27 @@ test('A08 two chats run independently, each with its own session and approval', 
   await a.promise;
   assert.equal(states(a.frames).at(-1), 'done');
   assert.equal(lines(join(r.ws, 'a.txt')), 1);
+});
+
+test('a hard stop frees the chat even when the Harness never answers the cancel, and keeps what was written', { skip }, async t => {
+  const r = await rig(t, { bridgeOptions: { forceStepMs: 400 } });
+  const slow = r.run('chat-hard', 'SCRIPT:slow 4000');
+  for (let i = 0; i < 200 && slow.frames.filter(f => f.type === 'delta').length < 3; i++) await new Promise(x => setTimeout(x, 50));
+  assert.ok(slow.frames.filter(f => f.type === 'delta').length >= 3, 'the turn must be live first');
+  // The Harness "hangs": the cancel is never answered and the turn never ends by itself.
+  const { rt } = r.bridge._debug(); const rpc = rt.gw.rpc.bind(rt.gw);
+  rt.gw.rpc = (method, params) => (method === 'session/cancel' ? new Promise(() => {}) : rpc(method, params));
+  const soft = await r.bridge.stop('chat-hard', { waitMs: 300 });
+  assert.equal(soft.stopped, false, 'a soft stop gives up and leaves the turn');
+  assert.equal(r.bridge.isRunning('chat-hard'), true);
+  const t0 = Date.now();
+  const hard = await r.bridge.stop('chat-hard', { force: true });
+  assert.deepEqual([hard.stopped, hard.ended], [true, 'forced']);
+  assert.ok(Date.now() - t0 < 3000, 'a hard stop is bounded');
+  assert.equal(r.bridge.isRunning('chat-hard'), false, 'the chat takes a new message');
+  await slow.promise;
+  assert.ok(slow.frames.some(f => f.type === 'delta'), 'what was written stays');
+  rt.gw.rpc = rpc; await rpc('session/cancel', { request: { sessionId: r.bridge.sessionOf('chat-hard') } }).catch(() => {});
 });
 
 test('a second send to a chat that is mid-turn is refused', { skip }, async t => {

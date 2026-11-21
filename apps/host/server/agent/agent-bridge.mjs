@@ -125,7 +125,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
  * @param {string} [options.nodePath]                   the Node runtime that runs the Harness
  * @param {(line:string)=>void} [options.log]
  */
-export function createAgentBridge({ profilePolicyFile = null, memoryFile = null, vibeStateDir = null, vibeDefaults = [], bindProfile = () => {}, dataDir, componentsDir = null, bundledDir = null, gate = true, localInstances, connections, tools = () => undefined, defaultLocalId = () => null, skillsDir = () => null, onGoal = () => {}, onPlan = () => {}, onQueue = () => {}, proxyBase = null, searchMock = null, expertSampling = () => null, engineProgress = () => null, engineGraceMs = 30 * 60_000, stallMs = 4 * 60_000, stallToolMs = 20 * 60_000, env = process.env, nodePath = process.execPath, log = () => {}, startTimeoutMs = 120_000, sessionReadyMs = 60_000, sessionRetryMs = 1_500 }) {
+export function createAgentBridge({ profilePolicyFile = null, memoryFile = null, vibeStateDir = null, vibeDefaults = [], bindProfile = () => {}, dataDir, componentsDir = null, bundledDir = null, gate = true, localInstances, connections, tools = () => undefined, defaultLocalId = () => null, skillsDir = () => null, onGoal = () => {}, onPlan = () => {}, onQueue = () => {}, proxyBase = null, searchMock = null, expertSampling = () => null, engineProgress = () => null, engineGraceMs = 30 * 60_000, stallMs = 4 * 60_000, stallToolMs = 20 * 60_000, forceStepMs = 6_000, env = process.env, nodePath = process.execPath, log = () => {}, startTimeoutMs = 120_000, sessionReadyMs = 60_000, sessionRetryMs = 1_500 }) {
   const root = join(dataDir, 'agent');
   const home = join(root, 'home');
   const sessionsFile = join(root, 'sessions.json');
@@ -1463,12 +1463,23 @@ ${note.text}
     } catch (e) { log(`agent · compact after a stopped turn failed: ${e.message}`); }
   }
 
-  async function stop(chatId, { waitMs = 20_000 } = {}) {
+  /**
+   * Stop a chat's turn. `force` (the Stop button, a message sent with "Interrupt the answer") is a hard stop: each step gets a few seconds,
+   * and a turn the Harness has not ended by then (a tool that ignores the cancel, a lost event) is ended here, so the chat is free again.
+   */
+  async function stop(chatId, { waitMs = 20_000, force = false } = {}) {
     const c = chats.get(chatId);
     const turn = c?.turn;
-    if (!turn && c?.starting) { c.cancelStart = true; return { stopped: true, ended: 'cancelled-before-start', ms: 0 }; }
+    if (!turn && c?.starting) {
+      c.cancelStart = true;
+      // A hard stop never leaves the chat marked as starting: a start that hung frees the chat too.
+      if (force) { const t0 = Date.now(); while (c.starting && Date.now() - t0 < forceStepMs) await new Promise(r => setTimeout(r, 50)); c.starting = false; }
+      return { stopped: true, ended: 'cancelled-before-start', ms: 0 };
+    }
     if (!turn || !rt) return { stopped: false, reason: 'no active turn' };
     const t0 = Date.now();
+    // A hard stop waits for each step at most forceStepMs; a soft stop waits for each as long as it takes.
+    const bounded = promise => force ? Promise.race([Promise.resolve(promise).catch(() => {}), new Promise(r => { const t = setTimeout(r, forceStepMs); t.unref?.(); })]) : promise;
     if (!turn.prompted) {
       // The Harness has not been given the prompt yet, so there is nothing to cancel there.
       turn.stopBeforePrompt = true;
@@ -1476,14 +1487,23 @@ ${note.text}
       if (early) return { stopped: true, ended: early.reason?.kind ?? 'aborted', ms: Date.now() - t0 };
     }
     turn.stopping = true;
-    await pauseGoal(rt, turn.sessionId, chatId);
-    // Helpers first: a helper still working would otherwise report back and wake the parent again.
-    await Promise.allSettled([...turn.children.values()].filter(h => !h.done).map(h => rt.gw.rpc('subagents/interruptByParent', { childSessionId: h.id, parentSessionId: turn.sessionId, mode: 'continuable' })));
-    await rt.gw.rpc('session/cancel', { request: { sessionId: turn.sessionId } }).catch(e => { if (turn.parentOpen) throw e; });
+    try {
+      await bounded(pauseGoal(rt, turn.sessionId, chatId));
+      // Helpers first: a helper still working would otherwise report back and wake the parent again.
+      await bounded(Promise.allSettled([...turn.children.values()].filter(h => !h.done).map(h => rt.gw.rpc('subagents/interruptByParent', { childSessionId: h.id, parentSessionId: turn.sessionId, mode: 'continuable' }))));
+      await bounded(rt.gw.rpc('session/cancel', { request: { sessionId: turn.sessionId } }).catch(e => { if (turn.parentOpen && !force) throw e; }));
+    } catch (e) { if (!force) throw e; }
     // Nothing is running in the parent (it was waiting for its helpers): the run ends once they are all down.
     if (!turn.parentOpen) { clearTimeout(turn.settleTimer); turn.settleTimer = after(300, () => { if (!turn.finished && !turn.parentOpen && [...turn.children.values()].every(h => h.done)) turn.finish(null); }); }
-    let timer; const result = await Promise.race([turn.ended.promise, new Promise(r => { timer = after(waitMs, () => r(null)); })]);
+    let timer; const result = await Promise.race([turn.ended.promise, new Promise(r => { timer = after(force ? Math.min(waitMs, forceStepMs) : waitMs, () => r(null)); })]);
     clearTimeout(timer);
+    if (!result && force && !turn.finished) {
+      // The Harness did not end it: end it here. What the assistant already wrote is kept, and the chat takes a new message.
+      log(`agent · hard stop: ended the turn of ${chatId} after ${Date.now() - t0} ms without the Harness`);
+      turn.parentOpen = false;
+      await turn.finish(null);
+      return { stopped: true, ended: 'forced', ms: Date.now() - t0 };
+    }
     if (!result) return { stopped: false, pending: true, reason: 'the turn is still stopping' };
     return { stopped: true, ended: result.reason?.kind ?? 'unknown', ms: Date.now() - t0 };
   }

@@ -16,7 +16,8 @@ export interface GroupFile { path: string; name: string; kind: DeliverableKind; 
 export interface GroupLive { label?: string; output?: string;
   /** A file being written right now (from `message.drafts`): characters so far, lines so far and the last lines of the text. */
   bytes?: number; lines?: number; tail?: string }
-export interface ActivityGroup { id: string; closed: boolean; line: string; added: number; removed: number; files: GroupFile[]; live?: GroupLive }
+/** `toolIds`: the tool cards (ToolCall ids on the same reply) this line stands for, in the order they ran; absent in replies saved before 0.2.11. */
+export interface ActivityGroup { id: string; closed: boolean; line: string; added: number; removed: number; files: GroupFile[]; live?: GroupLive; toolIds?: string[] }
 export type MessageBlock = { kind: 'text'; text: string } | ({ kind: 'group' } & ActivityGroup);
 
 const KINDS = ['html', 'markdown', 'pdf', 'csv', 'image', 'code', 'text', 'other'];
@@ -44,7 +45,8 @@ export function readGroup(raw: unknown): ActivityGroup | null {
   const liveRaw = g.live && typeof g.live === 'object' ? g.live as Record<string, unknown> : null;
   const last = (text: string) => text.trim().split(/\r?\n/).at(-1)!.slice(0, 200);
   const live: GroupLive | undefined = liveRaw && g.closed !== true ? { ...(typeof liveRaw.label === 'string' && liveRaw.label ? { label: liveRaw.label.slice(0, 160) } : {}), ...(typeof liveRaw.output === 'string' && liveRaw.output.trim() ? { output: last(liveRaw.output) } : {}) } : undefined;
-  return { id: g.id, closed: g.closed === true, line: typeof g.line === 'string' ? g.line : '', added: num(g.added), removed: num(g.removed), files, ...(live && (live.label || live.output) ? { live } : {}) };
+  const toolIds = Array.isArray(g.toolIds) ? g.toolIds.filter((x): x is string => typeof x === 'string' && !!x).slice(0, 2000) : [];
+  return { id: g.id, closed: g.closed === true, line: typeof g.line === 'string' ? g.line : '', added: num(g.added), removed: num(g.removed), files, ...(live && (live.label || live.output) ? { live } : {}), ...(toolIds.length ? { toolIds } : {}) };
 }
 
 /** The `skills-used` frame: the skills this reply used, each with the name the person gave it and a one-line description. */

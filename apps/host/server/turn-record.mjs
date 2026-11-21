@@ -40,7 +40,8 @@ export function readGroup(raw) {
   const liveRaw = g.live && typeof g.live === 'object' ? g.live : null;
   const last = text => text.trim().split(/\r?\n/).at(-1).slice(0, 200);
   const live = liveRaw && g.closed !== true ? { ...(typeof liveRaw.label === 'string' && liveRaw.label ? { label: liveRaw.label.slice(0, 160) } : {}), ...(typeof liveRaw.output === 'string' && liveRaw.output.trim() ? { output: last(liveRaw.output) } : {}) } : undefined;
-  return { id: g.id, closed: g.closed === true, line: typeof g.line === 'string' ? g.line : '', added: num(g.added), removed: num(g.removed), files, ...(live && (live.label || live.output) ? { live } : {}) };
+  const toolIds = Array.isArray(g.toolIds) ? g.toolIds.filter(x => typeof x === 'string' && x).slice(0, 2000) : [];
+  return { id: g.id, closed: g.closed === true, line: typeof g.line === 'string' ? g.line : '', added: num(g.added), removed: num(g.removed), files, ...(live && (live.label || live.output) ? { live } : {}), ...(toolIds.length ? { toolIds } : {}) };
 }
 /** deliverables.ts readSkills */
 export function readSkills(raw) {
